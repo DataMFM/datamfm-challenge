@@ -1,1 +1,25 @@
-<p>"Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum."</p>
+<h2>Evaluation Details</h2>
+
+<p>The evaluation follows the <a href="https://github.com/opendatalab/OmniDocBench" target="_blank">OmniDocBench v1.5</a> end-to-end evaluation framework.</p>
+
+<h3>How It Works</h3>
+<ol>
+    <li><strong>Parsing:</strong> Your submitted <code>.md</code> files are parsed to extract text blocks, formulas (<code>$$...$$</code>), and tables (<code>&lt;table&gt;</code>).</li>
+    <li><strong>Matching:</strong> Extracted elements are matched against the ground truth annotations using the <code>quick_match</code> algorithm based on content similarity.</li>
+    <li><strong>Scoring:</strong> Matched pairs are scored per dimension.</li>
+</ol>
+
+<h3>Metrics</h3>
+
+<h4>1. Text Edit Distance (↓ lower is better)</h4>
+<p>Normalized Levenshtein edit distance between predicted and ground-truth text blocks. Averaged across all matched text elements per page, then across all pages.</p>
+
+<h4>2. Table TEDS (↑ higher is better, 0–100)</h4>
+<p>Tree Edit Distance-based Similarity measures structural and content accuracy of tables. Ground truth and predictions are compared as HTML tree structures.</p>
+
+<h4>3. Formula CDM (↑ higher is better, 0–100)</h4>
+<p>Character Detection Matching renders both ground truth and predicted LaTeX formulas into images, then performs character-level spatial matching. This is more fair than string-based metrics since the same formula can have multiple valid LaTeX representations.</p>
+
+<h3>Overall Score</h3>
+<p><code>Overall = ((1 − Text_ED) × 100 + Table_TEDS + Formula_CDM) / 3</code></p>
+<p>All three dimensions are weighted equally. Rankings on the leaderboard are determined by the Overall score (higher is better).</p>

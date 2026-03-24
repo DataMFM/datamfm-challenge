@@ -1,3 +1,30 @@
-<p>"Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium, totam rem aperiam, eaque ipsa quae ab illo inventore veritatis et quasi architecto beatae vitae dicta sunt explicabo. Nemo enim ipsam voluptatem quia voluptas sit aspernatur aut odit aut fugit, sed quia consequuntur magni dolores eos qui ratione voluptatem sequi nesciunt. Neque porro quisquam est, qui dolorem ipsum quia dolor sit amet, consectetur, adipisci velit, sed quia non numquam eius modi tempora incidunt ut labore et dolore magnam aliquam quaerat voluptatem. Ut enim ad minima veniam, quis nostrum exercitationem ullam corporis suscipit laboriosam, nisi ut aliquid ex ea commodi consequatur? Quis autem vel eum iure reprehenderit qui in ea voluptate velit esse quam nihil molestiae consequatur, vel illum qui dolorem eum fugiat quo voluptas nulla pariatur?"</p>
+<h2>DataMFM End-to-End Document Parsing Challenge</h2>
 
-<p>"Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium, totam rem aperiam, eaque ipsa quae ab illo inventore veritatis et quasi architecto beatae vitae dicta sunt explicabo. Nemo enim ipsam voluptatem quia voluptas sit aspernatur aut odit aut fugit, sed quia consequuntur magni dolores eos qui ratione voluptatem sequi nesciunt. Neque porro quisquam est, qui dolorem ipsum quia dolor sit amet, consectetur, adipisci velit, sed quia non numquam eius modi tempora incidunt ut labore et dolore magnam aliquam quaerat voluptatem. Ut enim ad minima veniam, quis nostrum exercitationem ullam corporis suscipit laboriosam, nisi ut aliquid ex ea commodi consequatur? Quis autem vel eum iure reprehenderit qui in ea voluptate velit esse quam nihil molestiae consequatur, vel illum qui dolorem eum fugiat quo voluptas nulla pariatur?"</p>
+<p>The DataMFM Challenge focuses on <strong>end-to-end document parsing</strong> — given a document page image, produce a complete Markdown representation that accurately captures text, tables, and mathematical formulas.</p>
+
+<p>This challenge is part of the <a href="https://datamfm.github.io/" target="_blank">Emerging Directions in Data for Multimodal Foundation Models (DataMFM)</a> workshop at <strong>CVPR 2026</strong>.</p>
+
+<h3>Task</h3>
+<p>Given document page images from the OmniDocBench dataset, participants must generate Markdown files (<code>.md</code>) that faithfully represent the content of each page, including:</p>
+<ul>
+    <li><strong>Text:</strong> Paragraphs, titles, headers, footers, captions</li>
+    <li><strong>Tables:</strong> Structure and cell contents (HTML <code>&lt;table&gt;</code> format recommended)</li>
+    <li><strong>Formulas:</strong> Mathematical equations in LaTeX notation (<code>$$...$$</code>)</li>
+</ul>
+
+<h3>Evaluation</h3>
+<p>Submissions are evaluated on three dimensions following the <a href="https://github.com/opendatalab/OmniDocBench" target="_blank">OmniDocBench</a> evaluation framework:</p>
+<ol>
+    <li><strong>Text Recognition</strong> — Normalized Edit Distance (lower is better)</li>
+    <li><strong>Table Recognition</strong> — TEDS: Tree Edit Distance-based Similarity (0–100, higher is better)</li>
+    <li><strong>Formula Recognition</strong> — CDM: Character Detection Matching (0–100, higher is better)</li>
+</ol>
+
+<h3>Overall Score</h3>
+<p><code>Overall = ((1 − Text_Edit_Distance) × 100 + Table_TEDS + Formula_CDM) / 3</code></p>
+
+<h3>Dataset</h3>
+<p>The challenge uses <strong>OmniDocBench</strong> data — a comprehensive document parsing benchmark covering 981 pages from 113 PDF documents across 9 data types (academic papers, slides, financial reports, etc.) in English, Chinese, and mixed-language documents.</p>
+
+<h3>Organizers</h3>
+<p>Organized by the DataMFM Workshop team, supported by <a href="https://www.2077ai.com/" target="_blank">2077AI</a> &amp; <a href="https://www.abaka.ai/" target="_blank">Abaka AI</a>.</p>
