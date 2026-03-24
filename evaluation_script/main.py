@@ -110,18 +110,27 @@ def run_evaluation(gt_path, pred_dir):
         if samples is None:
             continue
 
+        # Check if samples have any data
+        sample_list = samples.samples if hasattr(samples, 'samples') else samples
+        if not sample_list:
+            print(f"Warning: no matched samples for {element_type}, skipping")
+            continue
+
         element_results = {}
         for metric_name in metrics_cfg[element_type]['metric']:
             metric_cls = METRIC_REGISTRY.get(metric_name)
             if metric_cls is None:
                 print(f"Warning: metric {metric_name} not found, skipping")
                 continue
-            samples_out, result_s = metric_cls(samples).evaluate([], f"evalai_{element_type}")
-            if result_s:
-                element_results.update(result_s)
-            # Update samples for next metric
-            if samples_out is not None:
-                samples = samples_out
+            try:
+                samples_out, result_s = metric_cls(samples).evaluate([], f"evalai_{element_type}")
+                if result_s:
+                    element_results.update(result_s)
+                # Update samples for next metric
+                if samples_out is not None:
+                    samples = samples_out
+            except Exception as e:
+                print(f"Warning: metric {metric_name} failed for {element_type}: {e}")
 
         results[element_type] = element_results
 
