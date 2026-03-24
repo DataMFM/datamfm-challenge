@@ -1,13 +1,10 @@
 """
-DataMFM End-to-End Document Parsing Challenge
-EvalAI Evaluation Script
+DataMFM End-to-End Document Parsing Challenge - EvalAI Evaluation Script
 
-This script receives:
-  - test_annotation_file: path to GT JSON (OmniDocBench format)
-  - user_submission_file: path to submitted .zip (containing .md files)
-  - phase_codename: "dev" or "test"
+LIGHTWEIGHT VERSION: Uses only Python standard library to avoid dependency issues
+on EvalAI's shared worker (Python 3.7, minimal packages).
 
-It runs OmniDocBench end-to-end evaluation and returns scores in EvalAI format.
+Flow: .zip submission → extract .md files → match with GT JSON → score → EvalAI JSON
 """
 
 import os
@@ -17,244 +14,361 @@ import zipfile
 import tempfile
 import shutil
 import traceback
+import re
+import difflib
+from collections import defaultdict
 
-# Add evaluation_script to sys.path so internal imports work
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-if SCRIPT_DIR not in sys.path:
-    sys.path.insert(0, SCRIPT_DIR)
 
-# Import OmniDocBench eval components
-from registry.registry import DATASET_REGISTRY, METRIC_REGISTRY, EVAL_TASK_REGISTRY
+# ============================================================
+# Text Edit Distance (using difflib, no external deps)
+# ============================================================
 
-# Force registration of all modules
-import dataset.end2end_dataset
-import dataset.recog_dataset
-import metrics.cal_metric
-import task.end2end_run_eval
+def normalized_edit_distance(s1, s2):
+    """Normalized edit distance using SequenceMatcher (standard lib)."""
+    if not s1 and not s2:
+        return 0.0
+    if not s1 or not s2:
+        return 1.0
+    ratio = difflib.SequenceMatcher(None, s1, s2).ratio()
+    return 1.0 - ratio
 
+
+# ============================================================
+# TEDS (Tree Edit Distance-based Similarity) - Simplified
+# ============================================================
+
+def simple_table_similarity(gt_html, pred_html):
+    """
+    Simplified table similarity based on cell text comparison.
+    Returns 0-1 score (1 = perfect match).
+    """
+    def extract_cells(html_str):
+        """Extract cell texts from HTML table."""
+        cells = []
+        # Simple regex to extract td/th content
+        cell_pattern = re.compile(r'<t[dh][^>]*>(.*?)</t[dh]>', re.DOTALL | re.IGNORECASE)
+        for match in cell_pattern.finditer(html_str):
+            # Strip nested HTML tags
+            text = re.sub(r'<[^>]+>', '', match.group(1)).strip()
+            cells.append(text)
+        return cells
+
+    gt_cells = extract_cells(gt_html)
+    pred_cells = extract_cells(pred_html)
+
+    if not gt_cells and not pred_cells:
+        return 1.0
+    if not gt_cells or not pred_cells:
+        return 0.0
+
+    # Compare cell by cell
+    max_len = max(len(gt_cells), len(pred_cells))
+    matches = 0
+    for i in range(min(len(gt_cells), len(pred_cells))):
+        ratio = difflib.SequenceMatcher(None, gt_cells[i], pred_cells[i]).ratio()
+        matches += ratio
+
+    return matches / max_len
+
+
+# ============================================================
+# Markdown Parser (extract text, formulas, tables from .md)
+# ============================================================
+
+def parse_markdown(content):
+    """
+    Parse markdown content into text blocks, formulas, and tables.
+    Simplified version of OmniDocBench's md_tex_filter.
+    """
+    elements = {
+        'text': [],
+        'formula': [],
+        'table': []
+    }
+
+    # Remove image references
+    content = re.sub(r'!\[.*?\]\(.*?\)', '', content)
+    # Remove markdown code fences
+    content = re.sub(r'```.*?```', '', content, flags=re.DOTALL)
+
+    # Extract HTML tables
+    table_pattern = re.compile(r'<table.*?>.*?</table>', re.DOTALL | re.IGNORECASE)
+    tables = table_pattern.findall(content)
+    for t in tables:
+        elements['table'].append(t.strip())
+    content = table_pattern.sub(' ', content)
+
+    # Extract display formulas ($$...$$)
+    formula_pattern = re.compile(r'\$\$(.*?)\$\$', re.DOTALL)
+    formulas = formula_pattern.findall(content)
+    for f in formulas:
+        elements['formula'].append(f.strip())
+    content = formula_pattern.sub(' ', content)
+
+    # Extract \[...\] formulas
+    formula_pattern2 = re.compile(r'\\\[(.*?)\\\]', re.DOTALL)
+    formulas2 = formula_pattern2.findall(content)
+    for f in formulas2:
+        elements['formula'].append(f.strip())
+    content = formula_pattern2.sub(' ', content)
+
+    # Remaining text: split by double newlines into paragraphs
+    paragraphs = re.split(r'\n\s*\n', content)
+    for p in paragraphs:
+        p = p.strip()
+        # Remove heading markers
+        p = re.sub(r'^#{1,6}\s*', '', p)
+        p = re.sub(r'\*\*(.*?)\*\*', r'\1', p)  # Remove bold
+        p = p.strip()
+        if p and len(p) > 3:  # Skip very short fragments
+            elements['text'].append(p)
+
+    return elements
+
+
+# ============================================================
+# Matching: GT elements ↔ Pred elements
+# ============================================================
+
+def match_elements(gt_list, pred_list):
+    """
+    Match GT elements to pred elements by content similarity.
+    Returns list of (gt_text, pred_text, similarity) tuples.
+    """
+    if not gt_list or not pred_list:
+        return []
+
+    matches = []
+    used_pred = set()
+
+    for gt_text in gt_list:
+        best_score = -1
+        best_idx = -1
+        for j, pred_text in enumerate(pred_list):
+            if j in used_pred:
+                continue
+            score = difflib.SequenceMatcher(None, gt_text, pred_text).ratio()
+            if score > best_score:
+                best_score = score
+                best_idx = j
+
+        if best_idx >= 0 and best_score > 0.1:  # minimum threshold
+            matches.append((gt_text, pred_list[best_idx], best_score))
+            used_pred.add(best_idx)
+
+    return matches
+
+
+# ============================================================
+# Main evaluation logic
+# ============================================================
 
 def extract_submission(zip_path, extract_dir):
-    """
-    Extract .zip submission to a flat directory of .md files.
-    Handles nested directories by flattening.
-    """
+    """Extract .zip → flat directory of .md files."""
     with zipfile.ZipFile(zip_path, 'r') as zf:
         zf.extractall(extract_dir)
 
-    # Flatten: find all .md files and move to extract_dir root
+    # Flatten: move all .md files to root
     md_files = []
     for root, dirs, files in os.walk(extract_dir):
-        # Skip __MACOSX
         if '__MACOSX' in root:
             continue
         for f in files:
             if f.endswith('.md') and not f.startswith('.'):
                 md_files.append(os.path.join(root, f))
 
-    # Move all .md files to root of extract_dir
     for md_path in md_files:
         dest = os.path.join(extract_dir, os.path.basename(md_path))
         if md_path != dest:
             shutil.move(md_path, dest)
 
-    # Clean up subdirectories
+    # Clean subdirectories
     for item in os.listdir(extract_dir):
         item_path = os.path.join(extract_dir, item)
         if os.path.isdir(item_path):
             shutil.rmtree(item_path)
 
-    final_md_files = [f for f in os.listdir(extract_dir) if f.endswith('.md')]
-    return final_md_files
+    return [f for f in os.listdir(extract_dir) if f.endswith('.md')]
+
+
+def evaluate_page(gt_page, pred_content):
+    """Evaluate a single page: GT JSON page vs predicted .md content."""
+    # Extract GT elements by category
+    gt_texts = []
+    gt_formulas = []
+    gt_tables = []
+
+    sorted_dets = sorted(gt_page.get('layout_dets', []),
+                         key=lambda x: x.get('order', 0) or 0)
+
+    for det in sorted_dets:
+        cat = det.get('category_type', '')
+        if cat in ['text_block', 'title', 'reference', 'code_txt']:
+            text = det.get('text', '').strip()
+            if text:
+                gt_texts.append(text)
+        elif cat == 'equation_isolated':
+            latex = det.get('latex', '').strip()
+            if latex:
+                # Clean $$ wrappers
+                latex = re.sub(r'^\$\$\s*', '', latex)
+                latex = re.sub(r'\s*\$\$$', '', latex)
+                gt_formulas.append(latex)
+        elif cat == 'table':
+            html = det.get('html', '').strip()
+            if html:
+                gt_tables.append(html)
+
+    # Parse prediction .md
+    pred = parse_markdown(pred_content)
+
+    # Score text
+    text_scores = []
+    text_matches = match_elements(gt_texts, pred['text'])
+    for gt, pr, _ in text_matches:
+        ed = normalized_edit_distance(gt, pr)
+        text_scores.append(ed)
+
+    # Add penalty for unmatched GT texts
+    unmatched_gt_text = len(gt_texts) - len(text_matches)
+    for _ in range(unmatched_gt_text):
+        text_scores.append(1.0)  # worst score for missing
+
+    # Score formulas
+    formula_scores = []
+    formula_matches = match_elements(gt_formulas, pred['formula'])
+    for gt, pr, _ in formula_matches:
+        ed = normalized_edit_distance(gt, pr)
+        formula_scores.append(ed)
+
+    unmatched_gt_formula = len(gt_formulas) - len(formula_matches)
+    for _ in range(unmatched_gt_formula):
+        formula_scores.append(1.0)
+
+    # Score tables
+    table_scores = []
+    table_matches = match_elements(gt_tables, pred['table'])
+    for gt, pr, _ in table_matches:
+        teds = simple_table_similarity(gt, pr)
+        table_scores.append(teds)
+
+    unmatched_gt_table = len(gt_tables) - len(table_matches)
+    for _ in range(unmatched_gt_table):
+        table_scores.append(0.0)
+
+    return {
+        'text_eds': text_scores,
+        'formula_eds': formula_scores,
+        'table_teds': table_scores,
+    }
 
 
 def run_evaluation(gt_path, pred_dir):
-    """
-    Run OmniDocBench end-to-end evaluation.
-    Returns dict with per-dimension scores.
-    """
-    # Build config matching OmniDocBench end2end format
-    cfg_task = {
-        'dataset': {
-            'dataset_name': 'end2end_dataset',
-            'ground_truth': {
-                'data_path': gt_path
-            },
-            'prediction': {
-                'data_path': pred_dir
-            },
-            'match_method': 'quick_match'
-        },
-        'metrics': {
-            'text_block': {
-                'metric': ['Edit_dist']
-            },
-            'display_formula': {
-                'metric': ['Edit_dist']  # CDM requires LaTeX rendering; use Edit_dist as fallback
-            },
-            'table': {
-                'metric': ['TEDS', 'Edit_dist']
-            }
-        }
-    }
+    """Run full evaluation across all pages."""
+    with open(gt_path, 'r') as f:
+        gt_data = json.load(f)
 
-    # Initialize dataset (does matching)
-    dataset_cls = DATASET_REGISTRY.get('end2end_dataset')
-    dataset = dataset_cls(cfg_task)
+    all_text_eds = []
+    all_formula_eds = []
+    all_table_teds = []
+    pages_evaluated = 0
 
-    # Run metrics for each element type
-    results = {}
-    metrics_cfg = cfg_task['metrics']
+    for gt_page in gt_data:
+        img_name = gt_page['page_info']['image_path']
+        base_name = os.path.splitext(img_name)[0]
 
-    for element_type in metrics_cfg:
-        samples = dataset.samples.get(element_type)
-        if samples is None:
-            continue
-
-        # Check if samples have any data
-        sample_list = samples.samples if hasattr(samples, 'samples') else samples
-        if not sample_list:
-            print(f"Warning: no matched samples for {element_type}, skipping")
-            continue
-
-        element_results = {}
-        for metric_name in metrics_cfg[element_type]['metric']:
-            metric_cls = METRIC_REGISTRY.get(metric_name)
-            if metric_cls is None:
-                print(f"Warning: metric {metric_name} not found, skipping")
+        # Find matching .md prediction
+        pred_path = os.path.join(pred_dir, base_name + '.md')
+        if not os.path.exists(pred_path):
+            # Try alternative naming
+            pred_path = os.path.join(pred_dir, base_name.replace('.pdf', '') + '.md')
+            if not os.path.exists(pred_path):
+                print("WARNING: No prediction for {}".format(img_name))
                 continue
-            try:
-                samples_out, result_s = metric_cls(samples).evaluate([], f"evalai_{element_type}")
-                if result_s:
-                    element_results.update(result_s)
-                # Update samples for next metric
-                if samples_out is not None:
-                    samples = samples_out
-            except Exception as e:
-                print(f"Warning: metric {metric_name} failed for {element_type}: {e}")
 
-        results[element_type] = element_results
+        with open(pred_path, 'r', encoding='utf-8') as f:
+            pred_content = f.read()
 
-    return results
+        page_result = evaluate_page(gt_page, pred_content)
+        all_text_eds.extend(page_result['text_eds'])
+        all_formula_eds.extend(page_result['formula_eds'])
+        all_table_teds.extend(page_result['table_teds'])
+        pages_evaluated += 1
 
+    print("Evaluated {} pages".format(pages_evaluated))
 
-def compute_scores(results):
-    """
-    Compute final scores from OmniDocBench results.
+    # Compute averages
+    text_ed = sum(all_text_eds) / max(len(all_text_eds), 1)
+    formula_ed = sum(all_formula_eds) / max(len(all_formula_eds), 1)
+    table_teds = sum(all_table_teds) / max(len(all_table_teds), 1) * 100
 
-    Result structure from OmniDocBench metrics:
-      Edit_dist: {"Edit_dist": {"ALL_page_avg": float, "edit_whole": float, "edit_sample_avg": float}}
-      TEDS: {"TEDS": {"all": float}, "TEDS_structure_only": {"all": float}}
+    # Formula CDM approximated by (1 - ED) * 100
+    formula_cdm = (1.0 - formula_ed) * 100
 
-    Returns:
-        dict with Text_ED, Table_TEDS, Formula_CDM, Overall
-    """
-    # Extract Text Edit Distance
-    # Use ALL_page_avg (average ED per page, then average across pages)
-    text_ed = 0.0
-    if 'text_block' in results and results['text_block']:
-        ed_results = results['text_block'].get('Edit_dist', {})
-        text_ed = ed_results.get('ALL_page_avg', ed_results.get('edit_sample_avg', 0.0))
-
-    # Extract Table TEDS (0-1 scale from OmniDocBench, convert to 0-100)
-    table_teds = 0.0
-    if 'table' in results and results['table']:
-        teds_results = results['table'].get('TEDS', {})
-        table_teds = teds_results.get('all', 0.0)
-        # TEDS is 0-1 in OmniDocBench, convert to 0-100
-        if table_teds <= 1.0:
-            table_teds *= 100
-
-    # Extract Formula score (Edit Distance for now, CDM when available)
-    # Convert ED to CDM-like score: (1 - ED) * 100
-    formula_score = 0.0
-    if 'display_formula' in results and results['display_formula']:
-        formula_results = results['display_formula'].get('Edit_dist', {})
-        formula_ed = formula_results.get('ALL_page_avg', formula_results.get('edit_sample_avg', 0.0))
-        formula_score = (1.0 - formula_ed) * 100
-
-    # Compute Overall: ((1 - Text_ED) * 100 + Table_TEDS + Formula_CDM) / 3
+    # Overall = ((1 - Text_ED) * 100 + Table_TEDS + Formula_CDM) / 3
     text_score = (1.0 - text_ed) * 100
-    overall = (text_score + table_teds + formula_score) / 3.0
+    overall = (text_score + table_teds + formula_cdm) / 3.0
 
     return {
         "Text_ED": round(text_ed, 4),
         "Table_TEDS": round(table_teds, 2),
-        "Formula_CDM": round(formula_score, 2),
+        "Formula_CDM": round(formula_cdm, 2),
         "Overall": round(overall, 2)
     }
 
 
+# ============================================================
+# EvalAI entry point
+# ============================================================
+
 def evaluate(test_annotation_file, user_submission_file, phase_codename, **kwargs):
     """
     EvalAI evaluation entry point.
-
-    Args:
-        test_annotation_file: Path to GT JSON on the server
-        user_submission_file: Path to submitted .zip file
-        phase_codename: "dev" or "test"
-
-    Returns:
-        dict in EvalAI format
     """
-    print(f"Starting DataMFM Evaluation for phase: {phase_codename}")
-    print(f"GT file: {test_annotation_file}")
-    print(f"Submission file: {user_submission_file}")
+    print("Starting DataMFM Evaluation for phase: {}".format(phase_codename))
+    print("GT file: {}".format(test_annotation_file))
+    print("Submission file: {}".format(user_submission_file))
 
     output = {}
     tmp_dir = None
 
     try:
-        # Create temp directory for extraction
         tmp_dir = tempfile.mkdtemp(prefix="datamfm_eval_")
         pred_dir = os.path.join(tmp_dir, "predictions")
         os.makedirs(pred_dir, exist_ok=True)
 
-        # Extract submission .zip
+        # Extract submission
         if not zipfile.is_zipfile(user_submission_file):
             raise ValueError("Submission must be a .zip file containing .md files")
 
         md_files = extract_submission(user_submission_file, pred_dir)
-        print(f"Extracted {len(md_files)} .md files from submission")
+        print("Extracted {} .md files from submission".format(len(md_files)))
 
         if len(md_files) == 0:
             raise ValueError("No .md files found in the submitted .zip")
 
-        # Verify GT file exists
         if not os.path.exists(test_annotation_file):
-            raise ValueError(f"Ground truth file not found: {test_annotation_file}")
-
-        # Ensure result directory exists (OmniDocBench metrics write intermediate files)
-        os.makedirs('./result', exist_ok=True)
+            raise ValueError("Ground truth file not found: {}".format(test_annotation_file))
 
         # Run evaluation
-        results = run_evaluation(test_annotation_file, pred_dir)
-        scores = compute_scores(results)
-
-        print(f"Scores: {json.dumps(scores, indent=2)}")
+        scores = run_evaluation(test_annotation_file, pred_dir)
+        print("Scores: {}".format(json.dumps(scores, indent=2)))
 
         # Format for EvalAI
         split_name = "dev_split" if phase_codename == "dev" else "test_split"
 
         if phase_codename == "dev":
             output["result"] = [
-                {
-                    split_name: scores
-                }
+                {split_name: scores}
             ]
         elif phase_codename == "test":
             output["result"] = [
-                {
-                    "dev_split": scores  # Show on dev leaderboard too
-                },
-                {
-                    "test_split": scores
-                }
+                {"dev_split": scores},
+                {"test_split": scores}
             ]
         else:
             output["result"] = [
-                {
-                    split_name: scores
-                }
+                {split_name: scores}
             ]
 
         output["submission_result"] = scores
@@ -263,13 +377,12 @@ def evaluate(test_annotation_file, user_submission_file, phase_codename, **kwarg
             "phase": phase_codename
         }
 
-        print(f"Evaluation completed successfully for {phase_codename} phase")
+        print("Evaluation completed successfully for {} phase".format(phase_codename))
 
     except Exception as e:
-        print(f"Evaluation failed: {str(e)}")
+        print("Evaluation failed: {}".format(str(e)))
         print(traceback.format_exc())
 
-        # Return zero scores on error so EvalAI can still process
         error_scores = {
             "Text_ED": 1.0,
             "Table_TEDS": 0.0,
@@ -282,7 +395,6 @@ def evaluate(test_annotation_file, user_submission_file, phase_codename, **kwarg
         output["submission_metadata"] = {"error": str(e)}
 
     finally:
-        # Cleanup temp directory
         if tmp_dir and os.path.exists(tmp_dir):
             shutil.rmtree(tmp_dir, ignore_errors=True)
 
