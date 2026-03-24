@@ -372,10 +372,10 @@ def evaluate(test_annotation_file, user_submission_file, phase_codename, **kwarg
             ]
 
         output["submission_result"] = scores
-        output["submission_metadata"] = {
+        output["submission_metadata"] = json.dumps({
             "num_predictions": len(md_files),
             "phase": phase_codename
-        }
+        })
 
         print("Evaluation completed successfully for {} phase".format(phase_codename))
 
@@ -392,7 +392,7 @@ def evaluate(test_annotation_file, user_submission_file, phase_codename, **kwarg
         split_name = "dev_split" if phase_codename == "dev" else "test_split"
         output["result"] = [{split_name: error_scores}]
         output["submission_result"] = error_scores
-        output["submission_metadata"] = {"error": str(e)}
+        output["submission_metadata"] = json.dumps({"error": str(e)})
 
     finally:
         if tmp_dir and os.path.exists(tmp_dir):
