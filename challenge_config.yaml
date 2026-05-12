@@ -26,7 +26,7 @@ leaderboard:
   - id: 1
     schema:
       {
-        "labels": ["Text_ED", "Table_TEDS", "Formula_CDM", "Reading_Order", "Overall"],
+        "labels": ["Text_ED", "Table_TEDS", "Formula_CDM", "Overall"],
         "default_order_by": "Overall",
         "metadata": {
           "Text_ED": {
@@ -41,13 +41,9 @@ leaderboard:
             "sort_ascending": False,
             "description": "Character Detection Matching score for formula recognition. Higher is better (0-100).",
           },
-          "Reading_Order": {
-            "sort_ascending": False,
-            "description": "Reading order score converted from edit distance. Higher is better (0-100).",
-          },
           "Overall": {
             "sort_ascending": False,
-            "description": "Document overall score: ((1 - Text_ED) * 100 + Table_TEDS + Formula_CDM + Reading_Order) / 4. Higher is better.",
+            "description": "EvalAI document leaderboard score. Full document artifacts also include Reading_Order.",
           },
         },
       }

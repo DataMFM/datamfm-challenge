@@ -505,12 +505,16 @@ def _result_for_phase(phase_kind, scores):
 
 def _evalai_leaderboard_scores(task, scores):
     if task == "doc":
-        return scores
+        return {
+            "Text_ED": scores.get("Text_ED", 1.0),
+            "Table_TEDS": scores.get("Table_TEDS", 0.0),
+            "Formula_CDM": scores.get("Formula_CDM", 0.0),
+            "Overall": scores.get("Overall", 0.0),
+        }
     return {
         "Text_ED": 1.0,
         "Table_TEDS": 0.0,
         "Formula_CDM": 0.0,
-        "Reading_Order": 0.0,
         "Overall": 0.0,
     }
 
