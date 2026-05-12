@@ -55,22 +55,22 @@
     <tbody>
         <tr>
             <td><strong>CSV Numeric F1</strong></td>
-            <td>All numeric values are extracted from the predicted CSV and reference CSV. A predicted number matches a reference number if <code>|pred - gt| <= max(1e-4, 0.01 * |gt|)</code>. Matches are one-to-one. Precision, recall, and F1 are computed from matched numeric values.</td>
+            <td>Finite numeric values are extracted from data cells in the predicted CSV and reference CSV, excluding the header row and ignoring non-finite placeholders such as <code>NaN</code>. A predicted number matches a reference number if both are zero or <code>|pred - gt| / max(|pred|, |gt|) <= 0.01</code>. Precision, recall, and F1 are computed from the matched numeric values.</td>
             <td><code>0-100</code>, higher is better.</td>
         </tr>
         <tr>
             <td><strong>CSV Structural Score</strong></td>
-            <td>CSV structure is scored by comparing row count, column count, and header overlap. The score is <code>(RowScore + ColumnScore + HeaderScore) / 3</code>, where row and column scores are min/max ratios and header score is Jaccard overlap over normalized header cells.</td>
+            <td>CSV structure is scored as the mean of header column F1 and data-row ratio. Header cells are lowercased and stripped before matching. The row ratio is <code>min(pred_rows, gt_rows) / max(pred_rows, gt_rows)</code>.</td>
             <td><code>0-100</code>, higher is better.</td>
         </tr>
         <tr>
             <td><strong>Summary ROUGE-L</strong></td>
-            <td>Predicted chart summaries are compared with reference summaries using ROUGE-L F1. Tokens are lowercased alphanumeric spans, and the longest common subsequence determines precision and recall.</td>
+            <td>Predicted chart summaries are compared with reference summaries using ROUGE-L F1. The worker uses the standard <code>rouge_score</code> implementation with stemming when available, and falls back to token-level longest-common-subsequence F1 otherwise.</td>
             <td><code>0-100</code>, higher is better.</td>
         </tr>
         <tr>
             <td><strong>Summary Numeric Fact F1</strong></td>
-            <td>Numeric values are extracted from predicted and reference summaries and matched with the same tolerance rule used for CSV Numeric F1. The final score is numeric precision/recall F1.</td>
+            <td>Finite numeric values are extracted from predicted and reference summaries and matched with the same relative-tolerance rule used for CSV Numeric F1. The final score is numeric precision/recall F1.</td>
             <td><code>0-100</code>, higher is better.</td>
         </tr>
     </tbody>

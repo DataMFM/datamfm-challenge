@@ -322,9 +322,11 @@ def _numbers(text):
     pattern = r"-?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?%?"
     for raw in re.findall(pattern, str(text)):
         try:
-            values.append(float(raw.replace(",", "").rstrip("%")))
+            value = float(raw.replace(",", "").rstrip("%"))
         except ValueError:
-            pass
+            continue
+        if math.isfinite(value):
+            values.append(value)
     return sorted(set(values))
 
 
@@ -364,9 +366,10 @@ def _parse_csv_safe(text):
 
 def _cell_to_float(cell):
     try:
-        return float(str(cell).strip().replace(",", "").rstrip("%"))
+        value = float(str(cell).strip().replace(",", "").rstrip("%"))
     except ValueError:
         return None
+    return value if math.isfinite(value) else None
 
 
 def _csv_numbers(text):

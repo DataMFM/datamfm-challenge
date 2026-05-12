@@ -36,7 +36,7 @@ submission.zip
     └── chart2summary_predictions.jsonl
 </pre>
 
-<p>Each JSONL row must include an image identifier such as <code>imagename</code>, <code>image_name</code>, <code>filename</code>, or <code>id</code>. CSV predictions should use a field such as <code>predicted_csv</code>, <code>prediction</code>, <code>output</code>, or <code>csv</code>. Summary predictions should use a field such as <code>predicted_summary</code>, <code>prediction</code>, <code>output</code>, or <code>summary</code>.</p>
+<p>Use newline-delimited JSON (<code>.jsonl</code>), with exactly one JSON object per line. Do not upload a single JSON array for Chart Understanding predictions. Each JSONL row must include an image identifier such as <code>imagename</code>, <code>image_name</code>, <code>filename</code>, or <code>id</code>. CSV prediction rows should use <code>predicted_csv</code>, and summary prediction rows should use <code>predicted_summary</code>. The worker also accepts <code>prediction</code>, <code>output</code>, <code>csv</code>, or <code>summary</code> for compatibility, but the explicit field names are recommended.</p>
 
 <h3>Submission Metadata</h3>
 <p>Every submission must include:</p>
