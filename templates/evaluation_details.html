@@ -80,5 +80,8 @@
 <pre>Chart_Overall =
   (CSV_Numeric_F1 + CSV_Structural_Score + Summary_ROUGE_L + Summary_Numeric_Fact_F1) / 4</pre>
 
+<h3>EvalAI Result Columns</h3>
+<p>The EvalAI result table includes both task-specific metric groups. Document Parsing submissions populate <code>Doc_*</code> columns, Chart Understanding submissions populate <code>Chart_*</code> columns, and the non-selected task's columns are placeholders. The shared <code>Overall</code> column is the selected task's overall score.</p>
+
 <h3>Result Storage and Auditability</h3>
-<p>For both tasks, the remote worker saves the uploaded archive, extracted predictions, raw metric files, final scores, and request metadata for each submission. These artifacts are used to audit submissions and maintain the external Chart Understanding leaderboard.</p>
+<p>For both tasks, the remote worker saves the uploaded archive, extracted predictions, raw metric files, final scores, and request metadata for each submission. These artifacts are used to audit submissions and maintain challenge results.</p>

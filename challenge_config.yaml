@@ -10,7 +10,7 @@ terms_and_conditions: templates/terms_and_conditions.html
 image: logo.jpg
 submission_guidelines: templates/submission_guidelines.html
 category: [Workshop, Computer Vision, Document Understanding]
-leaderboard_description: EvalAI submissions are routed by the required Task metadata. Document Parsing is shown on the EvalAI leaderboard; Chart Understanding artifacts are saved by the remote worker for the external DataMFM leaderboard.
+leaderboard_description: EvalAI submissions are routed by the required Task metadata. The leaderboard shows both Document Parsing and Chart Understanding metrics. For each submission, the metrics for the selected Task are populated with real scores, while the other Task's columns use placeholder values. Overall is the selected Task's overall score.
 evaluation_script: evaluation_script.zip
 remote_evaluation: True
 start_date: 2026-03-24 00:00:00
@@ -26,24 +26,60 @@ leaderboard:
   - id: 1
     schema:
       {
-        "labels": ["Text_ED", "Table_TEDS", "Formula_CDM", "Overall"],
+        "labels":
+          [
+            "Doc_Text_ED",
+            "Doc_Table_TEDS",
+            "Doc_Formula_CDM",
+            "Doc_Overall",
+            "Chart_CSV_Numeric_F1",
+            "Chart_CSV_Structural_Score",
+            "Chart_Summary_ROUGE_L",
+            "Chart_Summary_Numeric_Fact_F1",
+            "Chart_Overall",
+            "Overall",
+          ],
         "default_order_by": "Overall",
         "metadata": {
-          "Text_ED": {
+          "Doc_Text_ED": {
             "sort_ascending": True,
             "description": "Normalized edit distance for text recognition. Lower is better (0 = perfect).",
           },
-          "Table_TEDS": {
+          "Doc_Table_TEDS": {
             "sort_ascending": False,
             "description": "Tree Edit Distance-based Similarity for table recognition. Higher is better (0-100).",
           },
-          "Formula_CDM": {
+          "Doc_Formula_CDM": {
             "sort_ascending": False,
             "description": "Character Detection Matching score for formula recognition. Higher is better (0-100).",
           },
+          "Doc_Overall": {
+            "sort_ascending": False,
+            "description": "Document Parsing overall score. Higher is better (0-100).",
+          },
+          "Chart_CSV_Numeric_F1": {
+            "sort_ascending": False,
+            "description": "Numeric F1 for chart-to-CSV predictions. Higher is better (0-100).",
+          },
+          "Chart_CSV_Structural_Score": {
+            "sort_ascending": False,
+            "description": "CSV header and row-structure agreement. Higher is better (0-100).",
+          },
+          "Chart_Summary_ROUGE_L": {
+            "sort_ascending": False,
+            "description": "ROUGE-L F1 for chart-to-summary predictions. Higher is better (0-100).",
+          },
+          "Chart_Summary_Numeric_Fact_F1": {
+            "sort_ascending": False,
+            "description": "Numeric fact F1 for chart summaries. Higher is better (0-100).",
+          },
+          "Chart_Overall": {
+            "sort_ascending": False,
+            "description": "Chart Understanding overall score. Higher is better (0-100).",
+          },
           "Overall": {
             "sort_ascending": False,
-            "description": "EvalAI document leaderboard score. Full document artifacts also include Reading_Order.",
+            "description": "Task-specific overall score for the selected submission task. Higher is better (0-100).",
           },
         },
       }
