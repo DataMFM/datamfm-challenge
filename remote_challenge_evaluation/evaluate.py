@@ -413,36 +413,6 @@ def _csv_structural_score(gt_csv, pred_csv):
     return (col_f1 + row_ratio) / 2.0
 
 
-def _normalize_csv_for_levenshtein(text):
-    text = str(text).strip()
-    text = re.sub(r"^```[a-zA-Z]*\n?", "", text)
-    text = re.sub(r"\n?```$", "", text)
-    text = re.sub(r"\s*,\s*", ",", text)
-    text = re.sub(r"\s*\n\s*", "\n", text)
-    return text.strip().lower()
-
-
-def _levenshtein_similarity(gt_csv, pred_csv):
-    a = _normalize_csv_for_levenshtein(gt_csv)[:4000]
-    b = _normalize_csv_for_levenshtein(pred_csv)[:4000]
-    if a == b:
-        return 1.0
-    max_len = max(len(a), len(b))
-    if max_len == 0:
-        return 1.0
-    previous = list(range(len(b) + 1))
-    for i, ca in enumerate(a, 1):
-        current = [i]
-        for j, cb in enumerate(b, 1):
-            current.append(min(
-                previous[j] + 1,
-                current[j - 1] + 1,
-                previous[j - 1] + (ca != cb),
-            ))
-        previous = current
-    return 1.0 - previous[len(b)] / max_len
-
-
 def _tokens(text):
     return re.findall(r"[a-z0-9]+", str(text).lower())
 
@@ -522,7 +492,6 @@ def _evaluate_chart_task(gt_path, pred_path, task):
                 "imagename": key,
                 "numeric_f1": _csv_numeric_f1(gt_csv, pred_csv),
                 "structural_score": _csv_structural_score(gt_csv, pred_csv),
-                "levenshtein_similarity": _levenshtein_similarity(gt_csv, pred_csv),
             })
         else:
             gt_summary = _first(gt, ["ground_truth_summary", "summary", "target_summary", "reference_summary"])
@@ -567,13 +536,7 @@ def _run_chart_eval(artifact_dir):
         "Summary_Numeric_Fact_F1": round(_mean(all_summary, "numeric_fact_f1") * 100, 2),
     }
     scores["Overall"] = round(sum(scores.values()) / 4.0, 2)
-    metric_result = {
-        "scores": scores,
-        "additional_metrics": {
-            "CSV_Levenshtein_Similarity": round(_mean(all_csv, "levenshtein_similarity") * 100, 2),
-        },
-        "extra_predictions": extras,
-    }
+    metric_result = {"scores": scores, "extra_predictions": extras}
     _safe_json_dump(Path(artifact_dir) / "result" / "chart_metric_result.json", metric_result)
     _safe_json_dump(Path(artifact_dir) / "result" / "chart_per_sample.json", {"csv": all_csv, "summary": all_summary})
     return metric_result, Path(artifact_dir) / "result" / "chart_metric_result.json"
