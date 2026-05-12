@@ -283,6 +283,13 @@ def _score_doc(metric_result):
 
 
 def _read_jsonl(path):
+    if Path(path).suffix == ".json":
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, list):
+            raise ValueError(f"Expected JSON array at {path}")
+        return data
+
     rows = []
     with open(path, "r", encoding="utf-8") as f:
         for line_no, line in enumerate(f, 1):
@@ -312,69 +319,128 @@ def _first(row, fields, default=""):
 
 def _numbers(text):
     values = []
-    for raw in re.findall(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?", str(text)):
+    pattern = r"-?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?%?"
+    for raw in re.findall(pattern, str(text)):
         try:
-            values.append(float(raw))
+            values.append(float(raw.replace(",", "").rstrip("%")))
         except ValueError:
             pass
-    return values
+    return sorted(set(values))
 
 
-def _numeric_f1(gt_text, pred_text):
+def _numbers_match(a, b):
+    if a == b == 0:
+        return True
+    return abs(a - b) / max(abs(a), abs(b)) <= CHART_NUMERIC_REL_TOL
+
+
+def _numeric_fact_f1(gt_text, pred_text):
     gt = _numbers(gt_text)
     pred = _numbers(pred_text)
     if not gt and not pred:
         return 1.0
     if not gt or not pred:
         return 0.0
-    used = set()
-    matches = 0
-    for g in gt:
-        best = None
-        best_err = float("inf")
-        for idx, p in enumerate(pred):
-            if idx in used:
-                continue
-            tol = max(CHART_NUMERIC_ABS_TOL, abs(g) * CHART_NUMERIC_REL_TOL)
-            err = abs(g - p)
-            if err <= tol and err < best_err:
-                best = idx
-                best_err = err
-        if best is not None:
-            used.add(best)
-            matches += 1
-    precision = matches / len(pred)
-    recall = matches / len(gt)
+    tp_pred = sum(1 for p in pred if any(_numbers_match(p, g) for g in gt))
+    tp_gt = sum(1 for g in gt if any(_numbers_match(p, g) for p in pred))
+    precision = tp_pred / len(pred)
+    recall = tp_gt / len(gt)
     return 0.0 if precision + recall == 0 else 2 * precision * recall / (precision + recall)
 
 
-def _csv_shape(text):
+def _parse_csv_safe(text):
+    text = str(text).strip()
+    text = re.sub(r"^```[a-zA-Z]*\n?", "", text)
+    text = re.sub(r"\n?```$", "", text).strip()
     try:
-        rows = list(csv.reader(io.StringIO(str(text))))
+        rows = list(csv.reader(io.StringIO(text)))
     except csv.Error:
-        rows = []
+        return [], []
     nonempty = [row for row in rows if any(cell.strip() for cell in row)]
     if not nonempty:
-        return 0, 0, []
-    cols = max(len(row) for row in nonempty)
-    header = [cell.strip().lower() for cell in nonempty[0] if cell.strip()]
-    return len(nonempty), cols, header
+        return [], []
+    return nonempty[0], nonempty[1:]
+
+
+def _cell_to_float(cell):
+    try:
+        return float(str(cell).strip().replace(",", "").rstrip("%"))
+    except ValueError:
+        return None
+
+
+def _csv_numbers(text):
+    _, rows = _parse_csv_safe(text)
+    values = set()
+    for row in rows:
+        for cell in row:
+            value = _cell_to_float(cell)
+            if value is not None:
+                values.add(value)
+    return sorted(values)
+
+
+def _csv_numeric_f1(gt_csv, pred_csv):
+    gt = _csv_numbers(gt_csv)
+    pred = _csv_numbers(pred_csv)
+    if not gt and not pred:
+        return 1.0
+    if not gt or not pred:
+        return 0.0
+    tp_pred = sum(1 for p in pred if any(_numbers_match(p, g) for g in gt))
+    tp_gt = sum(1 for g in gt if any(_numbers_match(p, g) for p in pred))
+    precision = tp_pred / len(pred)
+    recall = tp_gt / len(gt)
+    return 0.0 if precision + recall == 0 else 2 * precision * recall / (precision + recall)
 
 
 def _csv_structural_score(gt_csv, pred_csv):
-    gt_rows, gt_cols, gt_header = _csv_shape(gt_csv)
-    pr_rows, pr_cols, pr_header = _csv_shape(pred_csv)
-    if gt_rows == gt_cols == pr_rows == pr_cols == 0:
-        return 1.0
-    row_score = min(gt_rows, pr_rows) / max(gt_rows, pr_rows) if max(gt_rows, pr_rows) else 0.0
-    col_score = min(gt_cols, pr_cols) / max(gt_cols, pr_cols) if max(gt_cols, pr_cols) else 0.0
-    if gt_header or pr_header:
-        inter = len(set(gt_header) & set(pr_header))
-        union = len(set(gt_header) | set(pr_header))
-        header_score = inter / union if union else 1.0
+    gt_header, gt_rows = _parse_csv_safe(gt_csv)
+    pred_header, pred_rows = _parse_csv_safe(pred_csv)
+    gt_cols = {cell.strip().lower() for cell in gt_header if cell.strip()}
+    pred_cols = {cell.strip().lower() for cell in pred_header if cell.strip()}
+    if gt_cols or pred_cols:
+        true_positive = len(gt_cols & pred_cols)
+        precision = true_positive / len(pred_cols) if pred_cols else 0.0
+        recall = true_positive / len(gt_cols) if gt_cols else 0.0
+        col_f1 = 0.0 if precision + recall == 0 else 2 * precision * recall / (precision + recall)
     else:
-        header_score = 1.0
-    return (row_score + col_score + header_score) / 3.0
+        col_f1 = 1.0
+    if not gt_rows and not pred_rows:
+        row_ratio = 1.0
+    else:
+        row_ratio = min(len(gt_rows), len(pred_rows)) / max(len(gt_rows), len(pred_rows)) if max(len(gt_rows), len(pred_rows)) else 0.0
+    return (col_f1 + row_ratio) / 2.0
+
+
+def _normalize_csv_for_levenshtein(text):
+    text = str(text).strip()
+    text = re.sub(r"^```[a-zA-Z]*\n?", "", text)
+    text = re.sub(r"\n?```$", "", text)
+    text = re.sub(r"\s*,\s*", ",", text)
+    text = re.sub(r"\s*\n\s*", "\n", text)
+    return text.strip().lower()
+
+
+def _levenshtein_similarity(gt_csv, pred_csv):
+    a = _normalize_csv_for_levenshtein(gt_csv)[:4000]
+    b = _normalize_csv_for_levenshtein(pred_csv)[:4000]
+    if a == b:
+        return 1.0
+    max_len = max(len(a), len(b))
+    if max_len == 0:
+        return 1.0
+    previous = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        current = [i]
+        for j, cb in enumerate(b, 1):
+            current.append(min(
+                previous[j] + 1,
+                current[j - 1] + 1,
+                previous[j - 1] + (ca != cb),
+            ))
+        previous = current
+    return 1.0 - previous[len(b)] / max_len
 
 
 def _tokens(text):
@@ -382,6 +448,14 @@ def _tokens(text):
 
 
 def _rouge_l_f1(reference, prediction):
+    try:
+        from rouge_score import rouge_scorer
+
+        scorer = rouge_scorer.RougeScorer(["rougeL"], use_stemmer=True)
+        return scorer.score(str(reference), str(prediction))["rougeL"].fmeasure
+    except Exception:
+        pass
+
     ref = _tokens(reference)
     pred = _tokens(prediction)
     if not ref and not pred:
@@ -446,8 +520,9 @@ def _evaluate_chart_task(gt_path, pred_path, task):
             pred_csv = _first(pred, ["predicted_csv", "prediction", "output", "csv"])
             per_sample.append({
                 "imagename": key,
-                "numeric_f1": _numeric_f1(gt_csv, pred_csv),
+                "numeric_f1": _csv_numeric_f1(gt_csv, pred_csv),
                 "structural_score": _csv_structural_score(gt_csv, pred_csv),
+                "levenshtein_similarity": _levenshtein_similarity(gt_csv, pred_csv),
             })
         else:
             gt_summary = _first(gt, ["ground_truth_summary", "summary", "target_summary", "reference_summary"])
@@ -455,7 +530,7 @@ def _evaluate_chart_task(gt_path, pred_path, task):
             per_sample.append({
                 "imagename": key,
                 "rouge_l": _rouge_l_f1(gt_summary, pred_summary),
-                "numeric_fact_f1": _numeric_f1(gt_summary, pred_summary),
+                "numeric_fact_f1": _numeric_fact_f1(gt_summary, pred_summary),
             })
     return per_sample, extra
 
@@ -492,7 +567,13 @@ def _run_chart_eval(artifact_dir):
         "Summary_Numeric_Fact_F1": round(_mean(all_summary, "numeric_fact_f1") * 100, 2),
     }
     scores["Overall"] = round(sum(scores.values()) / 4.0, 2)
-    metric_result = {"scores": scores, "extra_predictions": extras}
+    metric_result = {
+        "scores": scores,
+        "additional_metrics": {
+            "CSV_Levenshtein_Similarity": round(_mean(all_csv, "levenshtein_similarity") * 100, 2),
+        },
+        "extra_predictions": extras,
+    }
     _safe_json_dump(Path(artifact_dir) / "result" / "chart_metric_result.json", metric_result)
     _safe_json_dump(Path(artifact_dir) / "result" / "chart_per_sample.json", {"csv": all_csv, "summary": all_summary})
     return metric_result, Path(artifact_dir) / "result" / "chart_metric_result.json"

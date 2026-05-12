@@ -40,10 +40,15 @@ $CHART_GT_ROOT/
   real/
     chart2csv_gt.jsonl
     chart2summary_gt.jsonl
+    hallucination_gt.jsonl
   synthetic/
     chart2csv_gt.jsonl
     chart2summary_gt.jsonl
+    hallucination_gt.jsonl
+    grounding_gt_hq_v16_final.jsonl
 ```
+
+The active Chart Understanding evaluator currently scores the chart-to-CSV and chart-to-summary tracks. Its deterministic metrics are aligned with the public ChartNet-Bench evaluator for the leaderboard-facing fields: CSV numeric F1 uses CSV data-cell numeric matching with 1% relative tolerance, CSV structural score uses header column F1 and row-count ratio, summary numeric fact F1 uses summary number matching with 1% relative tolerance, and ROUGE-L uses `rouge_score` with stemming when the package is installed. Hallucination and grounding GT files are stored on the server for future task expansion, but are not routed by the current EvalAI `Chart Understanding` worker path.
 
 Because the existing EvalAI challenge already exists, the worker does not require new EvalAI phases, dataset splits, or leaderboards. The submit page exposes a required `Task` radio field, and the worker records the selected task plus final scores in `submission_metadata.json`. The EvalAI leaderboard remains a document-oriented leaderboard. For chart submissions, the worker saves the real chart scores in the artifact directory and metadata, while returning a document-schema placeholder to EvalAI so chart metrics do not pollute the document leaderboard. Chart ranking can be rendered by an external DataMFM page from the saved chart artifacts or from a periodic export of the worker results.
 
