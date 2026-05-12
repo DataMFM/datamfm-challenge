@@ -1,76 +1,505 @@
+import csv
+import io
+import json
+import math
+import os
+import re
+import shutil
+import subprocess
+import tempfile
+import time
+import zipfile
+from pathlib import Path
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+SUBMISSIONS_ROOT = Path(os.environ.get("DATAMFM_SUBMISSIONS_ROOT", "/root/datamfm-test/submissions"))
+
+DOCKER_IMAGE = os.environ.get("EVAL_DOCKER_IMAGE", "omnidocbench-cdm-fixed:v2")
+DOC_EVAL_HOST_DIR = os.environ.get(
+    "DOC_EVAL_HOST_DIR", "/root/datamfm-test/OmniDocBench-eval-md2md"
+)
+DOC_GT_MDS_DIR = os.environ.get(
+    "DOC_GT_MDS_DIR", "/root/datamfm-test/OmniDocBench/demo_data/datamfm_20260409/mds"
+)
+DOC_EXPECTED_MD_COUNT = int(os.environ.get("DOC_EXPECTED_MD_COUNT", "89"))
+DOC_CDM_WORKERS = int(os.environ.get("DOC_CDM_WORKERS", "4"))
+
+CHART_GT_ROOT = Path(os.environ.get("CHART_GT_ROOT", "/root/datamfm-test/chart_gt"))
+CHART_NUMERIC_REL_TOL = float(os.environ.get("CHART_NUMERIC_REL_TOL", "0.01"))
+CHART_NUMERIC_ABS_TOL = float(os.environ.get("CHART_NUMERIC_ABS_TOL", "1e-4"))
+
+PHASE_TASKS = {
+    "dev": ("doc", "dev"),
+    "test": ("doc", "test"),
+    "doc_dev": ("doc", "dev"),
+    "doc_test": ("doc", "test"),
+    "chart_dev": ("chart", "dev"),
+    "chart_test": ("chart", "test"),
+}
+
+
+def _submission_id(kwargs):
+    metadata = kwargs.get("submission_metadata") or {}
+    for key in ("submission_pk", "pk", "id"):
+        value = metadata.get(key)
+        if value is not None:
+            return str(value)
+    return f"local_{int(time.time())}"
+
+
+def _task_for_phase(phase_codename):
+    try:
+        return PHASE_TASKS[phase_codename]
+    except KeyError as exc:
+        raise ValueError(
+            f"Unsupported phase_codename={phase_codename!r}. Expected one of {sorted(PHASE_TASKS)}"
+        ) from exc
+
+
+def _safe_json_dump(path, data):
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
+
+def _extract_flat(zip_path, output_dir, suffixes):
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    extracted = []
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        for member in zf.namelist():
+            if member.startswith("__MACOSX") or member.endswith("/"):
+                continue
+            if not any(member.endswith(suffix) for suffix in suffixes):
+                continue
+            basename = os.path.basename(member)
+            if not basename:
+                continue
+            target = output_dir / basename
+            with zf.open(member) as src, open(target, "wb") as dst:
+                shutil.copyfileobj(src, dst)
+            extracted.append(basename)
+    return extracted
+
+
+def _extract_tree(zip_path, output_dir):
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    extracted = []
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        for member in zf.namelist():
+            if member.startswith("__MACOSX") or member.endswith("/"):
+                continue
+            parts = [p for p in Path(member).parts if p not in ("", ".", "..")]
+            if not parts:
+                continue
+            target = output_dir.joinpath(*parts)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with zf.open(member) as src, open(target, "wb") as dst:
+                shutil.copyfileobj(src, dst)
+            extracted.append(str(Path(*parts)))
+    return extracted
+
+
+def _write_doc_config(work_dir):
+    config = f"""end2end_eval:
+  metrics:
+    text_block:
+      metric:
+        - Edit_dist
+    display_formula:
+      metric:
+        - CDM
+    table:
+      metric:
+        - TEDS
+        - Edit_dist
+    reading_order:
+      metric:
+        - Edit_dist
+  dataset:
+    dataset_name: md2md_dataset
+    ground_truth:
+      data_path: /workspace_gt/mds
+      page_info: /workspace_gt/mds
+    prediction:
+      data_path: /workspace_run/pred_mds
+    match_method: quick_match
+"""
+    config_path = Path(work_dir) / "doc_md2md_eval.yaml"
+    config_path.write_text(config, encoding="utf-8")
+    return config_path
+
+
+def _validate_doc_submission(pred_dir):
+    gt_names = {p.name for p in Path(DOC_GT_MDS_DIR).glob("*.md")}
+    pred_names = {p.name for p in Path(pred_dir).glob("*.md")}
+    missing = sorted(gt_names - pred_names)
+    extra = sorted(pred_names - gt_names)
+    if len(pred_names) != DOC_EXPECTED_MD_COUNT or missing or extra:
+        raise ValueError(
+            "Document submission filename mismatch. "
+            f"expected_count={DOC_EXPECTED_MD_COUNT}, got_count={len(pred_names)}, "
+            f"missing={missing[:10]}, extra={extra[:10]}"
+        )
+
+
+def _run_doc_eval(artifact_dir):
+    artifact_dir = Path(artifact_dir)
+    if not Path(DOC_EVAL_HOST_DIR).is_dir():
+        raise RuntimeError(f"DOC_EVAL_HOST_DIR does not exist: {DOC_EVAL_HOST_DIR}")
+    if not Path(DOC_GT_MDS_DIR).is_dir():
+        raise RuntimeError(f"DOC_GT_MDS_DIR does not exist: {DOC_GT_MDS_DIR}")
+
+    _write_doc_config(artifact_dir)
+    (artifact_dir / "result").mkdir(parents=True, exist_ok=True)
+    cmd = [
+        "docker", "run", "--rm", "--entrypoint", "bash",
+        "-e", f"OMNIDOCBENCH_CDM_WORKERS={DOC_CDM_WORKERS}",
+        "-v", f"{DOC_EVAL_HOST_DIR}:/workspace_eval:ro",
+        "-v", f"{Path(DOC_GT_MDS_DIR).parent}:/workspace_gt:ro",
+        "-v", f"{artifact_dir}:/workspace_run",
+        "-w", "/workspace_run",
+        DOCKER_IMAGE,
+        "-lc",
+        "PYTHONUNBUFFERED=1 python /workspace_eval/pdf_validation.py --config /workspace_run/doc_md2md_eval.yaml",
+    ]
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    (artifact_dir / "stdout.log").write_text(proc.stdout, encoding="utf-8")
+    (artifact_dir / "stderr.log").write_text(proc.stderr, encoding="utf-8")
+    _safe_json_dump(artifact_dir / "docker_command.json", {"cmd": cmd, "returncode": proc.returncode})
+    if proc.returncode != 0:
+        raise RuntimeError(
+            "Document Docker evaluation failed\n"
+            f"stdout_tail={proc.stdout[-4000:]}\n"
+            f"stderr_tail={proc.stderr[-4000:]}"
+        )
+
+    result_dir = artifact_dir / "result"
+    candidates = sorted(result_dir.glob("*_metric_result.json"), key=lambda p: p.stat().st_mtime)
+    if not candidates:
+        raise RuntimeError("Document evaluation finished without *_metric_result.json")
+    metric_path = candidates[-1]
+    metric_result = json.loads(metric_path.read_text(encoding="utf-8"))
+    return metric_result, metric_path
+
+
+def _score_doc(metric_result):
+    text_ed = metric_result.get("text_block", {}).get("all", {}).get("Edit_dist", {}).get("ALL_page_avg", 1.0)
+    table_teds = metric_result.get("table", {}).get("all", {}).get("TEDS", {}).get("all", 0.0) * 100
+    formula_cdm = metric_result.get("display_formula", {}).get("all", {}).get("CDM", {}).get("all", 0.0) * 100
+    reading_ed = metric_result.get("reading_order", {}).get("all", {}).get("Edit_dist", {}).get("ALL_page_avg", 1.0)
+    reading_order = (1.0 - reading_ed) * 100
+    overall = ((1.0 - text_ed) * 100 + table_teds + formula_cdm + reading_order) / 4.0
+    return {
+        "Text_ED": round(float(text_ed), 4),
+        "Table_TEDS": round(float(table_teds), 2),
+        "Formula_CDM": round(float(formula_cdm), 2),
+        "Reading_Order": round(float(reading_order), 2),
+        "Overall": round(float(overall), 2),
+    }
+
+
+def _read_jsonl(path):
+    rows = []
+    with open(path, "r", encoding="utf-8") as f:
+        for line_no, line in enumerate(f, 1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rows.append(json.loads(line))
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"Invalid JSONL at {path}:{line_no}: {exc}") from exc
+    return rows
+
+
+def _key(row):
+    for field in ("imagename", "image_name", "filename", "id"):
+        if field in row:
+            return str(row[field])
+    raise ValueError(f"Chart row missing image key: {row}")
+
+
+def _first(row, fields, default=""):
+    for field in fields:
+        if field in row and row[field] is not None:
+            return str(row[field])
+    return default
+
+
+def _numbers(text):
+    values = []
+    for raw in re.findall(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?", str(text)):
+        try:
+            values.append(float(raw))
+        except ValueError:
+            pass
+    return values
+
+
+def _numeric_f1(gt_text, pred_text):
+    gt = _numbers(gt_text)
+    pred = _numbers(pred_text)
+    if not gt and not pred:
+        return 1.0
+    if not gt or not pred:
+        return 0.0
+    used = set()
+    matches = 0
+    for g in gt:
+        best = None
+        best_err = float("inf")
+        for idx, p in enumerate(pred):
+            if idx in used:
+                continue
+            tol = max(CHART_NUMERIC_ABS_TOL, abs(g) * CHART_NUMERIC_REL_TOL)
+            err = abs(g - p)
+            if err <= tol and err < best_err:
+                best = idx
+                best_err = err
+        if best is not None:
+            used.add(best)
+            matches += 1
+    precision = matches / len(pred)
+    recall = matches / len(gt)
+    return 0.0 if precision + recall == 0 else 2 * precision * recall / (precision + recall)
+
+
+def _csv_shape(text):
+    try:
+        rows = list(csv.reader(io.StringIO(str(text))))
+    except csv.Error:
+        rows = []
+    nonempty = [row for row in rows if any(cell.strip() for cell in row)]
+    if not nonempty:
+        return 0, 0, []
+    cols = max(len(row) for row in nonempty)
+    header = [cell.strip().lower() for cell in nonempty[0] if cell.strip()]
+    return len(nonempty), cols, header
+
+
+def _csv_structural_score(gt_csv, pred_csv):
+    gt_rows, gt_cols, gt_header = _csv_shape(gt_csv)
+    pr_rows, pr_cols, pr_header = _csv_shape(pred_csv)
+    if gt_rows == gt_cols == pr_rows == pr_cols == 0:
+        return 1.0
+    row_score = min(gt_rows, pr_rows) / max(gt_rows, pr_rows) if max(gt_rows, pr_rows) else 0.0
+    col_score = min(gt_cols, pr_cols) / max(gt_cols, pr_cols) if max(gt_cols, pr_cols) else 0.0
+    if gt_header or pr_header:
+        inter = len(set(gt_header) & set(pr_header))
+        union = len(set(gt_header) | set(pr_header))
+        header_score = inter / union if union else 1.0
+    else:
+        header_score = 1.0
+    return (row_score + col_score + header_score) / 3.0
+
+
+def _tokens(text):
+    return re.findall(r"[a-z0-9]+", str(text).lower())
+
+
+def _rouge_l_f1(reference, prediction):
+    ref = _tokens(reference)
+    pred = _tokens(prediction)
+    if not ref and not pred:
+        return 1.0
+    if not ref or not pred:
+        return 0.0
+    prev = [0] * (len(pred) + 1)
+    for rt in ref:
+        cur = [0]
+        for j, pt in enumerate(pred, 1):
+            cur.append(prev[j - 1] + 1 if rt == pt else max(prev[j], cur[-1]))
+        prev = cur
+    lcs = prev[-1]
+    precision = lcs / len(pred)
+    recall = lcs / len(ref)
+    return 0.0 if precision + recall == 0 else 2 * precision * recall / (precision + recall)
+
+
+def _chart_gt_file(split, task):
+    candidates = [
+        CHART_GT_ROOT / split / f"{task}_gt.jsonl",
+        CHART_GT_ROOT / split / f"{task}.jsonl",
+        CHART_GT_ROOT / f"{split}_{task}_gt.jsonl",
+        CHART_GT_ROOT / f"{split}_{task}.jsonl",
+    ]
+    for path in candidates:
+        if path.exists():
+            return path
+    raise RuntimeError(
+        f"Missing chart GT for split={split}, task={task}. Tried: {[str(p) for p in candidates]}"
+    )
+
+
+def _chart_pred_file(pred_root, split, task):
+    candidates = [
+        Path(pred_root) / split / f"{task}_predictions.jsonl",
+        Path(pred_root) / split / f"{task}.jsonl",
+        Path(pred_root) / f"{split}_{task}_predictions.jsonl",
+        Path(pred_root) / f"{split}_{task}.jsonl",
+    ]
+    for path in candidates:
+        if path.exists():
+            return path
+    raise ValueError(
+        f"Missing chart prediction for split={split}, task={task}. Tried: {[str(p) for p in candidates]}"
+    )
+
+
+def _evaluate_chart_task(gt_path, pred_path, task):
+    gt_rows = {_key(row): row for row in _read_jsonl(gt_path)}
+    pred_rows = {_key(row): row for row in _read_jsonl(pred_path)}
+    missing = sorted(set(gt_rows) - set(pred_rows))
+    extra = sorted(set(pred_rows) - set(gt_rows))
+    per_sample = []
+    if missing:
+        raise ValueError(f"Missing {len(missing)} predictions for {task}: {missing[:10]}")
+    for key in sorted(gt_rows):
+        gt = gt_rows[key]
+        pred = pred_rows[key]
+        if task == "chart2csv":
+            gt_csv = _first(gt, ["ground_truth_csv", "csv", "target_csv", "reference_csv"])
+            pred_csv = _first(pred, ["predicted_csv", "prediction", "output", "csv"])
+            per_sample.append({
+                "imagename": key,
+                "numeric_f1": _numeric_f1(gt_csv, pred_csv),
+                "structural_score": _csv_structural_score(gt_csv, pred_csv),
+            })
+        else:
+            gt_summary = _first(gt, ["ground_truth_summary", "summary", "target_summary", "reference_summary"])
+            pred_summary = _first(pred, ["predicted_summary", "prediction", "output", "summary"])
+            per_sample.append({
+                "imagename": key,
+                "rouge_l": _rouge_l_f1(gt_summary, pred_summary),
+                "numeric_fact_f1": _numeric_f1(gt_summary, pred_summary),
+            })
+    return per_sample, extra
+
+
+def _mean(rows, field):
+    vals = [row[field] for row in rows if field in row and not math.isnan(row[field])]
+    return sum(vals) / len(vals) if vals else 0.0
+
+
+def _run_chart_eval(artifact_dir):
+    pred_root = Path(artifact_dir) / "predictions"
+    all_csv = []
+    all_summary = []
+    extras = {}
+    for split in ("real", "synthetic"):
+        csv_rows, csv_extra = _evaluate_chart_task(
+            _chart_gt_file(split, "chart2csv"), _chart_pred_file(pred_root, split, "chart2csv"), "chart2csv"
+        )
+        summary_rows, summary_extra = _evaluate_chart_task(
+            _chart_gt_file(split, "chart2summary"), _chart_pred_file(pred_root, split, "chart2summary"), "chart2summary"
+        )
+        for row in csv_rows:
+            row["split"] = split
+        for row in summary_rows:
+            row["split"] = split
+        all_csv.extend(csv_rows)
+        all_summary.extend(summary_rows)
+        extras[split] = {"chart2csv": csv_extra[:20], "chart2summary": summary_extra[:20]}
+
+    scores = {
+        "CSV_Numeric_F1": round(_mean(all_csv, "numeric_f1") * 100, 2),
+        "CSV_Structural_Score": round(_mean(all_csv, "structural_score") * 100, 2),
+        "Summary_ROUGE_L": round(_mean(all_summary, "rouge_l") * 100, 2),
+        "Summary_Numeric_Fact_F1": round(_mean(all_summary, "numeric_fact_f1") * 100, 2),
+    }
+    scores["Overall"] = round(sum(scores.values()) / 4.0, 2)
+    metric_result = {"scores": scores, "extra_predictions": extras}
+    _safe_json_dump(Path(artifact_dir) / "result" / "chart_metric_result.json", metric_result)
+    _safe_json_dump(Path(artifact_dir) / "result" / "chart_per_sample.json", {"csv": all_csv, "summary": all_summary})
+    return metric_result, Path(artifact_dir) / "result" / "chart_metric_result.json"
+
+
+def _result_for_phase(task, phase_codename, scores):
+    if task == "doc":
+        split_name = "doc_dev_split" if phase_codename in ("dev", "doc_dev") else "doc_test_split"
+    else:
+        split_name = "chart_dev_split" if phase_codename == "chart_dev" else "chart_test_split"
+    return [{split_name: scores}]
 
 
 def evaluate(user_submission_file, phase_codename, test_annotation_file=None, **kwargs):
-    print("Starting Evaluation.....")
-    """
-    Evaluates the submission for a particular challenge phase and returns score
-    Arguments:
-        `user_submission_file`: Path to file submitted by the user
-        `phase_codename`: Phase to which submission is made
+    task, phase_kind = _task_for_phase(phase_codename)
+    submission_id = _submission_id(kwargs)
+    artifact_dir = SUBMISSIONS_ROOT / task / submission_id
+    if artifact_dir.exists():
+        shutil.rmtree(artifact_dir)
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(user_submission_file, artifact_dir / "submission.zip")
+    _safe_json_dump(artifact_dir / "request_metadata.json", {
+        "task": task,
+        "phase_codename": phase_codename,
+        "phase_kind": phase_kind,
+        "submission_id": submission_id,
+        "submission_metadata": kwargs.get("submission_metadata", {}),
+    })
 
-        `test_annotations_file`: Path to test_annotation_file on the server
-            We recommend setting a default `test_annotation_file` or using `phase_codename`
-            to select the appropriate file. For example, you could load test annotation file
-            for current phase as:
-            ```
-            test_annotation_file = json.loads(open("{phase_codename}_path", "r"))
-            ```
-        `**kwargs`: keyword arguments that contains additional submission
-        metadata that challenge hosts can use to send slack notification.
-        You can access the submission metadata
-        with kwargs['submission_metadata']
-        Example: A sample submission metadata can be accessed like this:
-        >>> print(kwargs['submission_metadata'])
-        {
-            'status': u'running',
-            'when_made_public': None,
-            'participant_team': 5,
-            'input_file': 'https://abc.xyz/path/to/submission/file.json',
-            'execution_time': u'123',
-            'publication_url': u'ABC',
-            'challenge_phase': 1,
-            'created_by': u'ABC',
-            'stdout_file': 'https://abc.xyz/path/to/stdout/file.json',
-            'method_name': u'Test',
-            'stderr_file': 'https://abc.xyz/path/to/stderr/file.json',
-            'participant_team_name': u'Test Team',
-            'project_url': u'http://foo.bar',
-            'method_description': u'ABC',
-            'is_public': False,
-            'submission_result_file': 'https://abc.xyz/path/result/file.json',
-            'id': 123,
-            'submitted_at': u'2017-03-20T19:22:03.880652Z'
+    try:
+        if not zipfile.is_zipfile(user_submission_file):
+            raise ValueError("Submission must be a .zip file")
+
+        if task == "doc":
+            pred_dir = artifact_dir / "pred_mds"
+            extracted = _extract_flat(user_submission_file, pred_dir, [".md"])
+            if not extracted:
+                raise ValueError("Document submission must contain .md files")
+            _validate_doc_submission(pred_dir)
+            metric_result, metric_path = _run_doc_eval(artifact_dir)
+            scores = _score_doc(metric_result)
+            eval_engine = "doc_md2md_cdm"
+        else:
+            pred_dir = artifact_dir / "predictions"
+            extracted = _extract_tree(user_submission_file, pred_dir)
+            if not extracted:
+                raise ValueError("Chart submission zip is empty")
+            metric_result, metric_path = _run_chart_eval(artifact_dir)
+            scores = metric_result["scores"]
+            eval_engine = "chart_jsonl_deterministic"
+
+        metadata = {
+            "task": task,
+            "phase": phase_codename,
+            "submission_id": submission_id,
+            "artifact_dir": str(artifact_dir),
+            "metric_result_path": str(metric_path),
+            "num_extracted_files": len(extracted),
+            "eval_engine": eval_engine,
         }
-    """
-
-    '''
-    # Load test annotation file for current phase
-    test_annotation_file = json.loads(open("{phase_codename}_path", "r"))
-    '''
-    output = {}
-    if phase_codename == "dev":
-        print("Evaluating for Dev Phase")
-        output["result"] = [
-            {
-                "split": "train_split",
-                "show_to_participant": True,
-                "accuracies": {"Metric1": 90},
-            },
-        ]
-        print("Completed evaluation for Dev Phase")
-    elif phase_codename == "test":
-        print("Evaluating for Test Phase")
-        output["result"] = [
-            {
-                "split": "train_split",
-                "show_to_participant": True,
-                "accuracies": {"Metric1": 90},
-            },
-            {
-                "split": "test_split",
-                "show_to_participant": False,
-                "accuracies": {"Metric1": 50, "Metric2": 40},
-            },
-        ]
-        print("Completed evaluation for Test Phase")
-    return output
+        _safe_json_dump(artifact_dir / "scores.json", scores)
+        _safe_json_dump(artifact_dir / "submission_metadata.json", metadata)
+        return {
+            "submission_status": "FINISHED",
+            "result": _result_for_phase(task, phase_codename, scores),
+            "submission_result": scores,
+            "submission_metadata": json.dumps(metadata),
+            "stdout": (artifact_dir / "stdout.log").read_text(encoding="utf-8")[-12000:] if (artifact_dir / "stdout.log").exists() else "",
+            "stderr": (artifact_dir / "stderr.log").read_text(encoding="utf-8")[-12000:] if (artifact_dir / "stderr.log").exists() else "",
+        }
+    except Exception as exc:
+        if task == "doc":
+            error_scores = {"Text_ED": 1.0, "Table_TEDS": 0.0, "Formula_CDM": 0.0, "Reading_Order": 0.0, "Overall": 0.0}
+        else:
+            error_scores = {"CSV_Numeric_F1": 0.0, "CSV_Structural_Score": 0.0, "Summary_ROUGE_L": 0.0, "Summary_Numeric_Fact_F1": 0.0, "Overall": 0.0}
+        metadata = {
+            "task": task,
+            "phase": phase_codename,
+            "submission_id": submission_id,
+            "artifact_dir": str(artifact_dir),
+            "error": str(exc),
+        }
+        _safe_json_dump(artifact_dir / "error.json", metadata)
+        return {
+            "submission_status": "FAILED",
+            "result": _result_for_phase(task, phase_codename, error_scores),
+            "submission_result": error_scores,
+            "submission_metadata": json.dumps(metadata),
+            "stdout": "",
+            "stderr": str(exc),
+        }
