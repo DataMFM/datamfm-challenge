@@ -31,6 +31,7 @@ leaderboard:
             "Doc_Text_ED",
             "Doc_Table_TEDS",
             "Doc_Formula_CDM",
+            "Doc_Reading_Order",
             "Doc_Overall",
             "Chart_CSV_Numeric_F1",
             "Chart_CSV_Structural_Score",
@@ -52,6 +53,10 @@ leaderboard:
           "Doc_Formula_CDM": {
             "sort_ascending": False,
             "description": "Character Detection Matching score for formula recognition. Higher is better (0-100).",
+          },
+          "Doc_Reading_Order": {
+            "sort_ascending": False,
+            "description": "Reading order score converted from reading-order edit distance. Higher is better (0-100).",
           },
           "Doc_Overall": {
             "sort_ascending": False,
