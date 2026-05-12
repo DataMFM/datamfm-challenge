@@ -29,13 +29,32 @@ CHART_GT_ROOT = Path(os.environ.get("CHART_GT_ROOT", "/root/datamfm-test/chart_g
 CHART_NUMERIC_REL_TOL = float(os.environ.get("CHART_NUMERIC_REL_TOL", "0.01"))
 CHART_NUMERIC_ABS_TOL = float(os.environ.get("CHART_NUMERIC_ABS_TOL", "1e-4"))
 
-PHASE_TASKS = {
-    "dev": ("doc", "dev"),
-    "test": ("doc", "test"),
-    "doc_dev": ("doc", "dev"),
-    "doc_test": ("doc", "test"),
-    "chart_dev": ("chart", "dev"),
-    "chart_test": ("chart", "test"),
+PHASE_KINDS = {
+    "dev": "dev",
+    "test": "test",
+    "doc_dev": "dev",
+    "doc_test": "test",
+    "chart_dev": "dev",
+    "chart_test": "test",
+}
+
+EXPLICIT_PHASE_TASKS = {
+    "doc_dev": "doc",
+    "doc_test": "doc",
+    "chart_dev": "chart",
+    "chart_test": "chart",
+}
+
+TASK_ALIASES = {
+    "doc": "doc",
+    "document": "doc",
+    "document_parsing": "doc",
+    "document parsing": "doc",
+    "documents": "doc",
+    "chart": "chart",
+    "chart_understanding": "chart",
+    "chart understanding": "chart",
+    "charts": "chart",
 }
 
 
@@ -48,13 +67,75 @@ def _submission_id(kwargs):
     return f"local_{int(time.time())}"
 
 
-def _task_for_phase(phase_codename):
-    try:
-        return PHASE_TASKS[phase_codename]
-    except KeyError as exc:
+def _normalize_task(value):
+    if value is None:
+        return None
+    normalized = str(value).strip().lower().replace("-", "_")
+    return TASK_ALIASES.get(normalized)
+
+
+def _metadata_values(metadata, wanted_keys):
+    if isinstance(metadata, str):
+        try:
+            metadata = json.loads(metadata)
+        except json.JSONDecodeError:
+            return
+
+    if isinstance(metadata, dict):
+        lower_to_key = {str(key).lower(): key for key in metadata}
+        for wanted in wanted_keys:
+            key = lower_to_key.get(wanted)
+            if key is not None:
+                yield metadata[key]
+        for nested_key in ("submission_metadata", "metadata", "meta"):
+            if nested_key in metadata:
+                yield from _metadata_values(metadata[nested_key], wanted_keys)
+        return
+
+    if isinstance(metadata, list):
+        for item in metadata:
+            if isinstance(item, dict):
+                name = item.get("name") or item.get("key") or item.get("field_name")
+                if name and str(name).lower() in wanted_keys:
+                    for value_key in ("value", "values", "answer", "data"):
+                        if value_key in item:
+                            yield item[value_key]
+                yield from _metadata_values(item, wanted_keys)
+
+
+def _task_from_metadata(metadata):
+    wanted_keys = {"task", "submission_task"}
+    for value in _metadata_values(metadata, wanted_keys):
+        if isinstance(value, list):
+            for item in value:
+                task = _normalize_task(item)
+                if task:
+                    return task
+        else:
+            task = _normalize_task(value)
+            if task:
+                return task
+    return None
+
+
+def _task_for_phase(phase_codename, submission_metadata=None):
+    if phase_codename not in PHASE_KINDS:
+        supported = sorted(set(PHASE_KINDS) | {"dev", "test"})
+        raise ValueError(f"Unsupported phase_codename={phase_codename!r}. Expected one of {supported}")
+
+    phase_kind = PHASE_KINDS[phase_codename]
+    task = EXPLICIT_PHASE_TASKS.get(phase_codename)
+    if task is None:
+        task = _task_from_metadata(submission_metadata or {})
+    if task is None:
+        task = os.environ.get("DATAMFM_DEFAULT_TASK", "doc")
+    task = _normalize_task(task)
+    if task not in {"doc", "chart"}:
         raise ValueError(
-            f"Unsupported phase_codename={phase_codename!r}. Expected one of {sorted(PHASE_TASKS)}"
-        ) from exc
+            "Unsupported or missing Task metadata. Please choose either "
+            "'Document Parsing' or 'Chart Understanding'."
+        )
+    return task, phase_kind
 
 
 def _safe_json_dump(path, data):
@@ -417,16 +498,14 @@ def _run_chart_eval(artifact_dir):
     return metric_result, Path(artifact_dir) / "result" / "chart_metric_result.json"
 
 
-def _result_for_phase(task, phase_codename, scores):
-    if task == "doc":
-        split_name = "doc_dev_split" if phase_codename in ("dev", "doc_dev") else "doc_test_split"
-    else:
-        split_name = "chart_dev_split" if phase_codename == "chart_dev" else "chart_test_split"
+def _result_for_phase(phase_kind, scores):
+    split_name = "dev_split" if phase_kind == "dev" else "test_split"
     return [{split_name: scores}]
 
 
 def evaluate(user_submission_file, phase_codename, test_annotation_file=None, **kwargs):
-    task, phase_kind = _task_for_phase(phase_codename)
+    submission_metadata = kwargs.get("submission_metadata", {})
+    task, phase_kind = _task_for_phase(phase_codename, submission_metadata)
     submission_id = _submission_id(kwargs)
     artifact_dir = SUBMISSIONS_ROOT / task / submission_id
     if artifact_dir.exists():
@@ -438,7 +517,7 @@ def evaluate(user_submission_file, phase_codename, test_annotation_file=None, **
         "phase_codename": phase_codename,
         "phase_kind": phase_kind,
         "submission_id": submission_id,
-        "submission_metadata": kwargs.get("submission_metadata", {}),
+        "submission_metadata": submission_metadata,
     })
 
     try:
@@ -466,17 +545,19 @@ def evaluate(user_submission_file, phase_codename, test_annotation_file=None, **
         metadata = {
             "task": task,
             "phase": phase_codename,
+            "phase_kind": phase_kind,
             "submission_id": submission_id,
             "artifact_dir": str(artifact_dir),
             "metric_result_path": str(metric_path),
             "num_extracted_files": len(extracted),
             "eval_engine": eval_engine,
+            "scores": scores,
         }
         _safe_json_dump(artifact_dir / "scores.json", scores)
         _safe_json_dump(artifact_dir / "submission_metadata.json", metadata)
         return {
             "submission_status": "FINISHED",
-            "result": _result_for_phase(task, phase_codename, scores),
+            "result": _result_for_phase(phase_kind, scores),
             "submission_result": scores,
             "submission_metadata": json.dumps(metadata),
             "stdout": (artifact_dir / "stdout.log").read_text(encoding="utf-8")[-12000:] if (artifact_dir / "stdout.log").exists() else "",
@@ -490,14 +571,16 @@ def evaluate(user_submission_file, phase_codename, test_annotation_file=None, **
         metadata = {
             "task": task,
             "phase": phase_codename,
+            "phase_kind": phase_kind,
             "submission_id": submission_id,
             "artifact_dir": str(artifact_dir),
             "error": str(exc),
+            "scores": error_scores,
         }
         _safe_json_dump(artifact_dir / "error.json", metadata)
         return {
             "submission_status": "FAILED",
-            "result": _result_for_phase(task, phase_codename, error_scores),
+            "result": _result_for_phase(phase_kind, error_scores),
             "submission_result": error_scores,
             "submission_metadata": json.dumps(metadata),
             "stdout": "",

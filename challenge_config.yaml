@@ -10,7 +10,7 @@ terms_and_conditions: templates/terms_and_conditions.html
 image: logo.jpg
 submission_guidelines: templates/submission_guidelines.html
 category: [Workshop, Computer Vision, Document Understanding]
-leaderboard_description: Rankings are determined by the Overall score. Overall = ((1 − Text_Edit_Distance) × 100 + Table_TEDS + Formula_CDM) / 3.
+leaderboard_description: EvalAI submissions are routed by the required Task metadata. Document Parsing is shown on the EvalAI leaderboard; Chart Understanding artifacts are saved by the remote worker for the external DataMFM leaderboard.
 evaluation_script: evaluation_script.zip
 remote_evaluation: True
 start_date: 2026-03-24 00:00:00
@@ -26,7 +26,7 @@ leaderboard:
   - id: 1
     schema:
       {
-        "labels": ["Text_ED", "Table_TEDS", "Formula_CDM", "Overall"],
+        "labels": ["Text_ED", "Table_TEDS", "Formula_CDM", "Reading_Order", "Overall"],
         "default_order_by": "Overall",
         "metadata": {
           "Text_ED": {
@@ -41,9 +41,13 @@ leaderboard:
             "sort_ascending": False,
             "description": "Character Detection Matching score for formula recognition. Higher is better (0-100).",
           },
+          "Reading_Order": {
+            "sort_ascending": False,
+            "description": "Reading order score converted from edit distance. Higher is better (0-100).",
+          },
           "Overall": {
             "sort_ascending": False,
-            "description": "Overall score: ((1 - Text_ED) * 100 + Table_TEDS + Formula_CDM) / 3. Higher is better.",
+            "description": "Document overall score: ((1 - Text_ED) * 100 + Table_TEDS + Formula_CDM + Reading_Order) / 4. Higher is better.",
           },
         },
       }
@@ -77,6 +81,11 @@ challenge_phases:
       - name: publication_url
         is_visible: True
     submission_meta_attributes:
+      - name: Task
+        description: "Task to evaluate"
+        type: radio
+        options: ["Document Parsing", "Chart Understanding"]
+        required: True
       - name: ModelName
         description: "Name of your model (e.g., MinerU, Nougat, GPT-4o)"
         type: text
@@ -121,6 +130,11 @@ challenge_phases:
       - name: publication_url
         is_visible: True
     submission_meta_attributes:
+      - name: Task
+        description: "Task to evaluate"
+        type: radio
+        options: ["Document Parsing", "Chart Understanding"]
+        required: True
       - name: ModelName
         description: "Name of your model (e.g., MinerU, Nougat, GPT-4o)"
         type: text

@@ -18,9 +18,9 @@ For DataMFM, the remote worker is expected to:
 
 1. Run on the host that already has Docker available.
 2. Use the patched OmniDocBench runtime image: `omnidocbench-cdm-fixed:v2`.
-3. Route submissions by EvalAI phase codename: `doc_dev` / `doc_test` use the document parser evaluator, while `chart_dev` / `chart_test` use the chart evaluator.
+3. Route submissions by the required EvalAI `Task` submission metadata inside the existing `dev` / `test` phases. `Document Parsing` uses the document parser evaluator, while `Chart Understanding` uses the chart evaluator.
 4. Mount the host md2md evaluator checkout, defaulting to `/root/datamfm-test/OmniDocBench-eval-md2md`.
-5. Store all submission artifacts under `/root/datamfm-test/submissions/<task>/<submission_pk>/`.
+5. Store all submission artifacts under `/root/datamfm-test/submissions/<task>/<submission_pk>/`. This artifact directory includes the original zip, extracted predictions, raw metric results, `scores.json`, and request metadata.
 6. Read env vars from `.env.example` or another untracked env file before running.
 
 Important environment variables:
@@ -44,6 +44,8 @@ $CHART_GT_ROOT/
     chart2csv_gt.jsonl
     chart2summary_gt.jsonl
 ```
+
+Because the existing EvalAI challenge already exists, the worker does not require new EvalAI phases, dataset splits, or leaderboards. The submit page exposes a required `Task` radio field, and the worker records the selected task plus final scores in `submission_metadata.json`. The EvalAI leaderboard remains a document-oriented leaderboard; chart ranking can be rendered by an external DataMFM page from the saved chart artifacts or from a periodic export of the worker results.
 
 Example:
 
