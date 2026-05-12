@@ -523,6 +523,24 @@ def _evalai_leaderboard_scores(task, scores):
     }
 
 
+def _format_success_stdout(metadata, scores):
+    lines = [
+        "DataMFM evaluation completed successfully.",
+        f"Task: {metadata['task']}",
+        f"Phase: {metadata['phase']}",
+        f"Submission ID: {metadata['submission_id']}",
+        f"Evaluation engine: {metadata['eval_engine']}",
+        f"Extracted files: {metadata['num_extracted_files']}",
+        f"Artifact directory: {metadata['artifact_dir']}",
+        f"Metric result: {metadata['metric_result_path']}",
+        "Scores:",
+    ]
+    for key, value in scores.items():
+        lines.append(f"  {key}: {value}")
+    lines.append("Raw evaluator stdout/stderr are saved in the artifact directory.")
+    return "\n".join(lines)
+
+
 def evaluate(user_submission_file, phase_codename, test_annotation_file=None, **kwargs):
     submission_metadata = kwargs.get("submission_metadata", {})
     task, phase_kind = _task_for_phase(phase_codename, submission_metadata)
@@ -581,8 +599,8 @@ def evaluate(user_submission_file, phase_codename, test_annotation_file=None, **
             "result": _result_for_phase(phase_kind, leaderboard_scores),
             "submission_result": scores,
             "submission_metadata": json.dumps(metadata),
-            "stdout": (artifact_dir / "stdout.log").read_text(encoding="utf-8")[-12000:] if (artifact_dir / "stdout.log").exists() else "",
-            "stderr": (artifact_dir / "stderr.log").read_text(encoding="utf-8")[-12000:] if (artifact_dir / "stderr.log").exists() else "",
+            "stdout": _format_success_stdout(metadata, scores),
+            "stderr": "",
         }
     except Exception as exc:
         if task == "doc":
