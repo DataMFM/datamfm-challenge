@@ -1,25 +1,42 @@
 <h2>Evaluation Details</h2>
 
-<p>The evaluation follows the <a href="https://github.com/opendatalab/OmniDocBench" target="_blank">OmniDocBench v1.5</a> end-to-end evaluation framework.</p>
+<p>Submissions are routed by the required <strong>Task</strong> metadata. <strong>Dev Phase</strong> and <strong>Test Phase</strong> select the evaluation split, while <strong>Task</strong> selects the evaluator.</p>
 
-<h3>How It Works</h3>
-<ol>
-    <li><strong>Parsing:</strong> Your submitted <code>.md</code> files are parsed to extract text blocks, formulas (<code>$$...$$</code>), and tables (<code>&lt;table&gt;</code>).</li>
-    <li><strong>Matching:</strong> Extracted elements are matched against the ground truth annotations using the <code>quick_match</code> algorithm based on content similarity.</li>
-    <li><strong>Scoring:</strong> Matched pairs are scored per dimension.</li>
-</ol>
+<h3>Document Parsing Evaluation</h3>
+<p>Document Parsing follows the <a href="https://github.com/opendatalab/OmniDocBench" target="_blank">OmniDocBench</a> md2md evaluation pipeline. Submitted Markdown files are matched against document-level ground truth Markdown files with quick matching.</p>
 
-<h3>Metrics</h3>
+<h4>Text ED (lower is better)</h4>
+<p>Normalized Levenshtein edit distance between predicted and ground-truth text blocks.</p>
 
-<h4>1. Text Edit Distance (↓ lower is better)</h4>
-<p>Normalized Levenshtein edit distance between predicted and ground-truth text blocks. Averaged across all matched text elements per page, then across all pages.</p>
+<h4>Table TEDS (higher is better, 0-100)</h4>
+<p>Tree Edit Distance-based Similarity measures table structure and content agreement.</p>
 
-<h4>2. Table TEDS (↑ higher is better, 0–100)</h4>
-<p>Tree Edit Distance-based Similarity measures structural and content accuracy of tables. Ground truth and predictions are compared as HTML tree structures.</p>
+<h4>Formula CDM (higher is better, 0-100)</h4>
+<p>Character Detection Matching compares rendered LaTeX formulas using character-level matching.</p>
 
-<h4>3. Formula CDM (↑ higher is better, 0–100)</h4>
-<p>Character Detection Matching renders both ground truth and predicted LaTeX formulas into images, then performs character-level spatial matching. This is more fair than string-based metrics since the same formula can have multiple valid LaTeX representations.</p>
+<h4>Reading Order (higher is better, 0-100)</h4>
+<p>Reading order is computed from reading order edit distance as <code>(1 - Reading_Order_ED) * 100</code>.</p>
 
-<h3>Overall Score</h3>
-<p><code>Overall = ((1 − Text_ED) × 100 + Table_TEDS + Formula_CDM) / 3</code></p>
-<p>All three dimensions are weighted equally. Rankings on the leaderboard are determined by the Overall score (higher is better).</p>
+<h4>Document Overall</h4>
+<p><code>Overall = ((1 - Text_ED) * 100 + Table_TEDS + Formula_CDM + Reading_Order) / 4</code></p>
+
+<h3>Chart Understanding Evaluation</h3>
+<p>Chart Understanding evaluates JSONL predictions for chart-to-CSV and chart-to-summary tasks over real and synthetic chart splits.</p>
+
+<h4>CSV Numeric F1</h4>
+<p>Numeric values extracted from predicted CSV outputs are matched against reference numeric values with tolerance.</p>
+
+<h4>CSV Structural Score</h4>
+<p>Predicted CSV outputs are compared with references using row count, column count, and header agreement.</p>
+
+<h4>Summary ROUGE-L</h4>
+<p>Predicted chart summaries are compared against reference summaries using ROUGE-L F1.</p>
+
+<h4>Summary Numeric Fact F1</h4>
+<p>Numeric facts in predicted chart summaries are matched against numeric facts in reference summaries.</p>
+
+<h4>Chart Overall</h4>
+<p><code>Overall = (CSV_Numeric_F1 + CSV_Structural_Score + Summary_ROUGE_L + Summary_Numeric_Fact_F1) / 4</code></p>
+
+<h3>Result Storage</h3>
+<p>For both tasks, the remote worker saves the uploaded archive, extracted predictions, raw metric files, final scores, and request metadata for each submission. These artifacts are used to audit submissions and maintain the external chart leaderboard.</p>

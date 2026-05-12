@@ -45,7 +45,7 @@ $CHART_GT_ROOT/
     chart2summary_gt.jsonl
 ```
 
-Because the existing EvalAI challenge already exists, the worker does not require new EvalAI phases, dataset splits, or leaderboards. The submit page exposes a required `Task` radio field, and the worker records the selected task plus final scores in `submission_metadata.json`. The EvalAI leaderboard remains a document-oriented leaderboard; chart ranking can be rendered by an external DataMFM page from the saved chart artifacts or from a periodic export of the worker results.
+Because the existing EvalAI challenge already exists, the worker does not require new EvalAI phases, dataset splits, or leaderboards. The submit page exposes a required `Task` radio field, and the worker records the selected task plus final scores in `submission_metadata.json`. The EvalAI leaderboard remains a document-oriented leaderboard. For chart submissions, the worker saves the real chart scores in the artifact directory and metadata, while returning a document-schema placeholder to EvalAI so chart metrics do not pollute the document leaderboard. Chart ranking can be rendered by an external DataMFM page from the saved chart artifacts or from a periodic export of the worker results.
 
 Example:
 

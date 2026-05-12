@@ -2,8 +2,8 @@
 # EvalAI Configuration
 # Documentation: https://evalai.readthedocs.io/en/latest/configuration.html
 
-title: DataMFM End-to-End Document Parsing Challenge
-short_description: End-to-end document parsing challenge evaluating text, table, and formula recognition on OmniDocBench data.
+title: DataMFM Challenge
+short_description: DataMFM challenge submission portal for Document Parsing and Chart Understanding tasks.
 description: templates/description.html
 evaluation_details: templates/evaluation_details.html
 terms_and_conditions: templates/terms_and_conditions.html
@@ -73,16 +73,16 @@ challenge_phases:
     max_submissions: 500
     default_submission_meta_attributes:
       - name: method_name
-        is_visible: True
+        is_visible: False
       - name: method_description
-        is_visible: True
+        is_visible: False
       - name: project_url
-        is_visible: True
+        is_visible: False
       - name: publication_url
-        is_visible: True
+        is_visible: False
     submission_meta_attributes:
       - name: Task
-        description: "Task to evaluate"
+        description: "Select the task to evaluate; Dev/Test are dataset splits, not task names."
         type: radio
         options: ["Document Parsing", "Chart Understanding"]
         required: True
@@ -98,6 +98,18 @@ challenge_phases:
         description: "Does your method use external training data beyond the provided dataset?"
         type: boolean
         required: True
+      - name: MethodDescription
+        description: "Optional short description of your method"
+        type: text
+        required: False
+      - name: ProjectURL
+        description: "Optional project URL"
+        type: text
+        required: False
+      - name: PublicationURL
+        description: "Optional publication URL"
+        type: text
+        required: False
     is_restricted_to_select_one_submission: False
     is_partial_submission_evaluation_enabled: False
     allowed_submission_file_types: ".zip"
@@ -122,16 +134,16 @@ challenge_phases:
     max_submissions: 100
     default_submission_meta_attributes:
       - name: method_name
-        is_visible: True
+        is_visible: False
       - name: method_description
-        is_visible: True
+        is_visible: False
       - name: project_url
-        is_visible: True
+        is_visible: False
       - name: publication_url
-        is_visible: True
+        is_visible: False
     submission_meta_attributes:
       - name: Task
-        description: "Task to evaluate"
+        description: "Select the task to evaluate; Dev/Test are dataset splits, not task names."
         type: radio
         options: ["Document Parsing", "Chart Understanding"]
         required: True
@@ -147,6 +159,18 @@ challenge_phases:
         description: "Does your method use external training data beyond the provided dataset?"
         type: boolean
         required: True
+      - name: MethodDescription
+        description: "Optional short description of your method"
+        type: text
+        required: False
+      - name: ProjectURL
+        description: "Optional project URL"
+        type: text
+        required: False
+      - name: PublicationURL
+        description: "Optional publication URL"
+        type: text
+        required: False
     is_restricted_to_select_one_submission: False
     is_partial_submission_evaluation_enabled: False
     allowed_submission_file_types: ".zip"

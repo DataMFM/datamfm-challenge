@@ -1,30 +1,35 @@
-<h2>DataMFM End-to-End Document Parsing Challenge</h2>
+<h2>DataMFM Challenge</h2>
 
-<p>The DataMFM Challenge focuses on <strong>end-to-end document parsing</strong> — given a document page image, produce a complete Markdown representation that accurately captures text, tables, and mathematical formulas.</p>
+<p>The DataMFM Challenge provides a shared submission portal for two multimodal data understanding tasks: <strong>Document Parsing</strong> and <strong>Chart Understanding</strong>.</p>
 
 <p>This challenge is part of the <a href="https://datamfm.github.io/" target="_blank">Emerging Directions in Data for Multimodal Foundation Models (DataMFM)</a> workshop at <strong>CVPR 2026</strong>.</p>
 
-<h3>Task</h3>
-<p>Given document page images from the OmniDocBench dataset, participants must generate Markdown files (<code>.md</code>) that faithfully represent the content of each page, including:</p>
+<h3>Tasks</h3>
+<p><strong>Document Parsing</strong> asks participants to convert document content into Markdown that preserves text, tables, formulas, and reading order. The evaluator follows the OmniDocBench-style md2md pipeline.</p>
+
+<p><strong>Chart Understanding</strong> asks participants to predict structured chart data and chart summaries. The evaluator compares submitted JSONL predictions against real and synthetic chart ground truth files.</p>
+
+<h3>How to Submit</h3>
+<p>Use the existing <strong>Dev Phase</strong> or <strong>Test Phase</strong> to choose the evaluation split. Then choose <strong>Task</strong> in the submission metadata to select either Document Parsing or Chart Understanding. The uploaded <code>.zip</code> format must match the selected Task.</p>
+
+<h3>Document Parsing Metrics</h3>
 <ul>
-    <li><strong>Text:</strong> Paragraphs, titles, headers, footers, captions</li>
-    <li><strong>Tables:</strong> Structure and cell contents (HTML <code>&lt;table&gt;</code> format recommended)</li>
-    <li><strong>Formulas:</strong> Mathematical equations in LaTeX notation (<code>$$...$$</code>)</li>
+    <li><strong>Text ED:</strong> Normalized edit distance for text recognition. Lower is better.</li>
+    <li><strong>Table TEDS:</strong> Tree Edit Distance-based Similarity for table recognition. Higher is better.</li>
+    <li><strong>Formula CDM:</strong> Character Detection Matching for formula recognition. Higher is better.</li>
+    <li><strong>Reading Order:</strong> Reading order score converted from edit distance. Higher is better.</li>
 </ul>
 
-<h3>Evaluation</h3>
-<p>Submissions are evaluated on three dimensions following the <a href="https://github.com/opendatalab/OmniDocBench" target="_blank">OmniDocBench</a> evaluation framework:</p>
-<ol>
-    <li><strong>Text Recognition</strong> — Normalized Edit Distance (lower is better)</li>
-    <li><strong>Table Recognition</strong> — TEDS: Tree Edit Distance-based Similarity (0–100, higher is better)</li>
-    <li><strong>Formula Recognition</strong> — CDM: Character Detection Matching (0–100, higher is better)</li>
-</ol>
+<h3>Chart Understanding Metrics</h3>
+<ul>
+    <li><strong>CSV Numeric F1:</strong> Numeric agreement between predicted and reference chart data.</li>
+    <li><strong>CSV Structural Score:</strong> Agreement in CSV table shape and headers.</li>
+    <li><strong>Summary ROUGE-L:</strong> Text overlap for chart summaries.</li>
+    <li><strong>Summary Numeric Fact F1:</strong> Numeric fact agreement in chart summaries.</li>
+</ul>
 
-<h3>Overall Score</h3>
-<p><code>Overall = ((1 − Text_Edit_Distance) × 100 + Table_TEDS + Formula_CDM) / 3</code></p>
-
-<h3>Dataset</h3>
-<p>The challenge uses <strong>OmniDocBench</strong> data — a comprehensive document parsing benchmark covering 981 pages from 113 PDF documents across 9 data types (academic papers, slides, financial reports, etc.) in English, Chinese, and mixed-language documents.</p>
+<h3>Leaderboards</h3>
+<p>The EvalAI leaderboard is used for Document Parsing. Chart Understanding submissions are evaluated and saved by the remote worker, and chart rankings are maintained on the DataMFM challenge website.</p>
 
 <h3>Organizers</h3>
 <p>Organized by the DataMFM Workshop team, supported by <a href="https://www.2077ai.com/" target="_blank">2077AI</a> &amp; <a href="https://www.abaka.ai/" target="_blank">Abaka AI</a>.</p>

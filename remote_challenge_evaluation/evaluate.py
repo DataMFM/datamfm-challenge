@@ -503,6 +503,18 @@ def _result_for_phase(phase_kind, scores):
     return [{split_name: scores}]
 
 
+def _evalai_leaderboard_scores(task, scores):
+    if task == "doc":
+        return scores
+    return {
+        "Text_ED": 1.0,
+        "Table_TEDS": 0.0,
+        "Formula_CDM": 0.0,
+        "Reading_Order": 0.0,
+        "Overall": 0.0,
+    }
+
+
 def evaluate(user_submission_file, phase_codename, test_annotation_file=None, **kwargs):
     submission_metadata = kwargs.get("submission_metadata", {})
     task, phase_kind = _task_for_phase(phase_codename, submission_metadata)
@@ -555,9 +567,10 @@ def evaluate(user_submission_file, phase_codename, test_annotation_file=None, **
         }
         _safe_json_dump(artifact_dir / "scores.json", scores)
         _safe_json_dump(artifact_dir / "submission_metadata.json", metadata)
+        leaderboard_scores = _evalai_leaderboard_scores(task, scores)
         return {
             "submission_status": "FINISHED",
-            "result": _result_for_phase(phase_kind, scores),
+            "result": _result_for_phase(phase_kind, leaderboard_scores),
             "submission_result": scores,
             "submission_metadata": json.dumps(metadata),
             "stdout": (artifact_dir / "stdout.log").read_text(encoding="utf-8")[-12000:] if (artifact_dir / "stdout.log").exists() else "",
@@ -578,9 +591,10 @@ def evaluate(user_submission_file, phase_codename, test_annotation_file=None, **
             "scores": error_scores,
         }
         _safe_json_dump(artifact_dir / "error.json", metadata)
+        leaderboard_scores = _evalai_leaderboard_scores(task, error_scores)
         return {
             "submission_status": "FAILED",
-            "result": _result_for_phase(phase_kind, error_scores),
+            "result": _result_for_phase(phase_kind, leaderboard_scores),
             "submission_result": error_scores,
             "submission_metadata": json.dumps(metadata),
             "stdout": "",

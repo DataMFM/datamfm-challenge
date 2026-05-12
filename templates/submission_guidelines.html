@@ -1,58 +1,57 @@
 <h2>Submission Guidelines</h2>
 
-<h3>Submission Format</h3>
-<p>Submit predictions as a <strong><code>.zip</code> archive</strong> containing one <code>.md</code> (Markdown) file per document page image.</p>
+<h3>Before Uploading</h3>
+<p>Select the correct <strong>Task</strong> in the submission metadata. <strong>Dev Phase</strong> and <strong>Test Phase</strong> are dataset splits; they do not select the task. The selected Task controls which evaluator runs on your uploaded <code>.zip</code>.</p>
 
-<h4>File Naming</h4>
-<p>Each <code>.md</code> file must match the corresponding image filename:</p>
+<h3>Document Parsing Format</h3>
+<p>For <strong>Document Parsing</strong>, submit a <strong><code>.zip</code> archive</strong> containing one Markdown file per document. The archive should be flat, and each filename must match the corresponding document UUID in the ground truth.</p>
+
 <pre>
 submission.zip
-├── document_page_001.md   ← matches document_page_001.jpg
-├── document_page_002.md   ← matches document_page_002.jpg
+├── 00000000-0000-0000-0000-000000000001.md
+├── 00000000-0000-0000-0000-000000000002.md
 └── ...
 </pre>
-<p>Use a flat structure (no subdirectories).</p>
 
-<h4>Markdown Format Rules</h4>
+<p>Do not wrap the Markdown files inside an extra top-level directory. Submissions with missing or extra filenames will fail validation.</p>
+
+<h3>Document Markdown Rules</h3>
 <ul>
-    <li><strong>Text:</strong> Standard Markdown. Paragraphs separated by double newlines (<code>\n\n</code>). Headings with <code>#</code>.</li>
-    <li><strong>Formulas:</strong> Display formulas in <code>$$...$$</code>, inline formulas in <code>$...$</code>. Content must be LaTeX.</li>
-    <li><strong>Tables:</strong> HTML <code>&lt;table&gt;</code> format is recommended (supports merged cells). Markdown pipe tables are also accepted.</li>
-    <li><strong>Order:</strong> Elements must appear in reading order within each <code>.md</code> file.</li>
-    <li><strong>One file per page:</strong> Each <code>.md</code> file corresponds to exactly one page. Do not combine multiple pages.</li>
+    <li><strong>Text:</strong> Use standard Markdown. Paragraphs should be separated by blank lines.</li>
+    <li><strong>Formulas:</strong> Use LaTeX notation. Display formulas should use <code>$$...$$</code>, and inline formulas should use <code>$...$</code>.</li>
+    <li><strong>Tables:</strong> HTML <code>&lt;table&gt;</code> format is recommended because it supports merged cells. Markdown pipe tables are also accepted.</li>
+    <li><strong>Reading order:</strong> Elements should appear in natural reading order within each document-level <code>.md</code> file.</li>
 </ul>
 
-<h4>Example</h4>
+<h3>Chart Understanding Format</h3>
+<p>For <strong>Chart Understanding</strong>, submit a <strong><code>.zip</code> archive</strong> containing JSONL prediction files for both real and synthetic chart splits.</p>
+
 <pre>
-# Section Title
-
-Body text paragraph with standard Markdown formatting.
-Separate paragraphs with double newlines.
-
-$$
-\frac{\partial L}{\partial \theta} = \sum_{i=1}^{N} \nabla_\theta \ell(f(x_i), y_i)
-$$
-
-&lt;table&gt;
-  &lt;tr&gt;
-    &lt;th&gt;Model&lt;/th&gt;&lt;th&gt;Accuracy&lt;/th&gt;
-  &lt;/tr&gt;
-  &lt;tr&gt;
-    &lt;td&gt;Baseline&lt;/td&gt;&lt;td&gt;82.3&lt;/td&gt;
-  &lt;/tr&gt;
-&lt;/table&gt;
+submission.zip
+├── real/
+│   ├── chart2csv_predictions.jsonl
+│   └── chart2summary_predictions.jsonl
+└── synthetic/
+    ├── chart2csv_predictions.jsonl
+    └── chart2summary_predictions.jsonl
 </pre>
 
+<p>Each JSONL row must include an image identifier such as <code>imagename</code>, <code>image_name</code>, <code>filename</code>, or <code>id</code>. CSV predictions should use a field such as <code>predicted_csv</code>, <code>prediction</code>, <code>output</code>, or <code>csv</code>. Summary predictions should use a field such as <code>predicted_summary</code>, <code>prediction</code>, <code>output</code>, or <code>summary</code>.</p>
+
 <h3>Submission Metadata</h3>
-<p>When submitting, you must provide:</p>
+<p>Every submission must include:</p>
 <ul>
-    <li><strong>ModelName:</strong> Name of your model (e.g., MinerU, Nougat, GPT-4o)</li>
-    <li><strong>ModelType:</strong> End-to-End VLM / Pipeline / Hybrid / Other</li>
-    <li><strong>ExternalData:</strong> Whether external training data was used</li>
+    <li><strong>Task:</strong> Document Parsing or Chart Understanding. Choosing the wrong task for your uploaded file format will cause evaluation to fail.</li>
+    <li><strong>ModelName:</strong> Name of your model, such as MinerU, Nougat, or GPT-4o.</li>
+    <li><strong>ModelType:</strong> End-to-End VLM, Pipeline, Hybrid, or Other.</li>
+    <li><strong>ExternalData:</strong> Whether external training data beyond the provided dataset was used.</li>
 </ul>
+
+<h3>Leaderboard Notes</h3>
+<p>The EvalAI leaderboard is the Document Parsing leaderboard. Chart Understanding submissions are evaluated by the remote worker and saved with their full metric artifacts; chart rankings are maintained on the DataMFM challenge website.</p>
 
 <h3>Limits</h3>
 <ul>
-    <li><strong>Dev Phase:</strong> 10 submissions/day, 100/month</li>
-    <li><strong>Test Phase:</strong> 5 submissions/day, 30/month</li>
+    <li><strong>Dev Phase:</strong> 10 submissions/day, 100/month.</li>
+    <li><strong>Test Phase:</strong> 5 submissions/day, 30/month.</li>
 </ul>
