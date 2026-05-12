@@ -107,12 +107,11 @@ def process_message(evalai, message):
                 metadata=results.get("submission_metadata", ""),
             )
         else:
-            leaderboard_result = results.get("leaderboard_result", results.get("submission_result", results["result"]))
             update_finished(
                 evalai,
                 phase_pk,
                 submission_pk,
-                json.dumps(leaderboard_result),
+                json.dumps(results["result"]),
                 submission_error=results.get("stderr", ""),
                 stdout=results.get("stdout", ""),
                 metadata=results.get("submission_metadata", ""),

@@ -500,7 +500,11 @@ def _run_chart_eval(artifact_dir):
 
 def _result_for_phase(phase_kind, scores):
     split_name = "dev_split" if phase_kind == "dev" else "test_split"
-    return [{split_name: scores}]
+    return [{
+        "split": split_name,
+        "show_to_participant": True,
+        "accuracies": scores,
+    }]
 
 
 def _evalai_leaderboard_scores(task, scores):
@@ -575,7 +579,6 @@ def evaluate(user_submission_file, phase_codename, test_annotation_file=None, **
         return {
             "submission_status": "FINISHED",
             "result": _result_for_phase(phase_kind, leaderboard_scores),
-            "leaderboard_result": leaderboard_scores,
             "submission_result": scores,
             "submission_metadata": json.dumps(metadata),
             "stdout": (artifact_dir / "stdout.log").read_text(encoding="utf-8")[-12000:] if (artifact_dir / "stdout.log").exists() else "",
@@ -600,7 +603,6 @@ def evaluate(user_submission_file, phase_codename, test_annotation_file=None, **
         return {
             "submission_status": "FAILED",
             "result": _result_for_phase(phase_kind, leaderboard_scores),
-            "leaderboard_result": leaderboard_scores,
             "submission_result": error_scores,
             "submission_metadata": json.dumps(metadata),
             "stdout": "",
