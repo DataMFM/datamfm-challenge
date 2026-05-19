@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import time
 import traceback
@@ -17,6 +18,13 @@ queue_name = os.environ["QUEUE_NAME"]
 challenge_pk = os.environ["CHALLENGE_PK"]
 save_dir = Path(os.environ.get("SAVE_DIR", "/root/datamfm-test/downloads"))
 poll_interval_sec = int(os.environ.get("POLL_INTERVAL_SEC", "60"))
+
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 
 def download(submission, save_dir):
@@ -138,6 +146,11 @@ def process_message(evalai, message):
 if __name__ == "__main__":
     evalai = EvalAI_Interface(auth_token, evalai_api_server, queue_name, challenge_pk)
     while True:
-        message = evalai.get_message_from_sqs_queue()
+        try:
+            message = evalai.get_message_from_sqs_queue()
+        except Exception:
+            logger.exception("Failed to poll EvalAI queue; retrying after %s seconds", poll_interval_sec)
+            time.sleep(poll_interval_sec)
+            continue
         process_message(evalai, message)
         time.sleep(poll_interval_sec)
