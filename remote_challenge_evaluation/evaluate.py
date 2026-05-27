@@ -24,6 +24,7 @@ DOC_GT_MDS_DIR = os.environ.get(
 )
 DOC_EXPECTED_MD_COUNT = int(os.environ.get("DOC_EXPECTED_MD_COUNT", "89"))
 DOC_CDM_WORKERS = int(os.environ.get("DOC_CDM_WORKERS", "4"))
+DOC_EVAL_TIMEOUT_SECONDS = int(os.environ.get("DOC_EVAL_TIMEOUT_SECONDS", "3600"))
 
 CHART_GT_ROOT = Path(os.environ.get("CHART_GT_ROOT", "/root/datamfm-test/chart_gt"))
 CHART_NUMERIC_REL_TOL = float(os.environ.get("CHART_NUMERIC_REL_TOL", "0.01"))
@@ -226,6 +227,14 @@ def _validate_doc_submission(pred_dir):
         )
 
 
+def _timeout_output(value):
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return str(value)
+
+
 def _run_doc_eval(artifact_dir):
     artifact_dir = Path(artifact_dir)
     if not Path(DOC_EVAL_HOST_DIR).is_dir():
@@ -235,8 +244,10 @@ def _run_doc_eval(artifact_dir):
 
     _write_doc_config(artifact_dir)
     (artifact_dir / "result").mkdir(parents=True, exist_ok=True)
+    container_name = f"datamfm_doc_eval_{artifact_dir.name}_{os.getpid()}"
+    subprocess.run(["docker", "rm", "-f", container_name], capture_output=True, text=True)
     cmd = [
-        "docker", "run", "--rm", "--entrypoint", "bash",
+        "docker", "run", "--rm", "--name", container_name, "--entrypoint", "bash",
         "-e", f"OMNIDOCBENCH_CDM_WORKERS={DOC_CDM_WORKERS}",
         "-v", f"{DOC_EVAL_HOST_DIR}:/workspace_eval:ro",
         "-v", f"{Path(DOC_GT_MDS_DIR).parent}:/workspace_gt:ro",
@@ -246,10 +257,45 @@ def _run_doc_eval(artifact_dir):
         "-lc",
         "PYTHONUNBUFFERED=1 python /workspace_eval/pdf_validation.py --config /workspace_run/doc_md2md_eval.yaml",
     ]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    try:
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=DOC_EVAL_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as exc:
+        subprocess.run(["docker", "kill", container_name], capture_output=True, text=True)
+        subprocess.run(["docker", "rm", "-f", container_name], capture_output=True, text=True)
+        stdout = _timeout_output(exc.output)
+        stderr = _timeout_output(exc.stderr)
+        (artifact_dir / "stdout.log").write_text(stdout, encoding="utf-8")
+        (artifact_dir / "stderr.log").write_text(stderr, encoding="utf-8")
+        _safe_json_dump(
+            artifact_dir / "docker_command.json",
+            {
+                "cmd": cmd,
+                "returncode": "timeout",
+                "timeout_seconds": DOC_EVAL_TIMEOUT_SECONDS,
+            },
+        )
+        raise RuntimeError(
+            "Document Docker evaluation timed out "
+            f"after {DOC_EVAL_TIMEOUT_SECONDS} seconds\n"
+            f"stdout_tail={stdout[-4000:]}\n"
+            f"stderr_tail={stderr[-4000:]}"
+        ) from exc
+
     (artifact_dir / "stdout.log").write_text(proc.stdout, encoding="utf-8")
     (artifact_dir / "stderr.log").write_text(proc.stderr, encoding="utf-8")
-    _safe_json_dump(artifact_dir / "docker_command.json", {"cmd": cmd, "returncode": proc.returncode})
+    _safe_json_dump(
+        artifact_dir / "docker_command.json",
+        {
+            "cmd": cmd,
+            "returncode": proc.returncode,
+            "timeout_seconds": DOC_EVAL_TIMEOUT_SECONDS,
+        },
+    )
     if proc.returncode != 0:
         raise RuntimeError(
             "Document Docker evaluation failed\n"

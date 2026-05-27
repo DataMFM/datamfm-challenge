@@ -29,6 +29,7 @@ Important environment variables:
 DOC_EVAL_HOST_DIR=/root/datamfm-test/OmniDocBench-eval-md2md
 DOC_GT_MDS_DIR=/root/datamfm-test/OmniDocBench/demo_data/datamfm_20260409/mds
 DOC_CDM_WORKERS=4
+DOC_EVAL_TIMEOUT_SECONDS=3600
 CHART_GT_ROOT=/root/datamfm-test/chart_gt
 DATAMFM_SUBMISSIONS_ROOT=/root/datamfm-test/submissions
 ```
